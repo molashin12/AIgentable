@@ -1,0 +1,432 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Management
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  firstName String
+  lastName  String
+  phone     String?
+  avatar    String?
+  role      UserRole @default(TENANT_USER)
+  status    UserStatus @default(ACTIVE)
+  emailVerified Boolean @default(false)
+  lastLogin DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenant relationship
+  tenantId  String?
+  tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // User sessions
+  sessions  Session[]
+  
+  // Created agents
+  createdAgents Agent[] @relation("AgentCreator")
+  
+  // Conversations
+  conversations Conversation[]
+  
+  // API Keys
+  apiKeys   ApiKey[]
+
+  @@map("users")
+}
+
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String?  @unique
+  subdomain   String?  @unique
+  logo        String?
+  description String?
+  industry    String?
+  companySize String?
+  settings    Json?    // Tenant-specific settings
+  plan        SubscriptionPlan @default(FREE)
+  status      TenantStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  users       User[]
+  agents      Agent[]
+  conversations Conversation[]
+  documents   Document[]
+  channels    Channel[]
+  analytics   Analytics[]
+  subscriptions Subscription[]
+
+  @@map("tenants")
+}
+
+// AI Agents
+model Agent {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  avatar      String?
+  personality Json     // Personality traits and configuration
+  role        String   // sales, support, etc.
+  prompt      String   // System prompt
+  model       String   @default("gpt-4")
+  temperature Float    @default(0.7)
+  maxTokens   Int      @default(1000)
+  status      AgentStatus @default(DRAFT)
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Creator
+  creatorId   String
+  creator     User     @relation("AgentCreator", fields: [creatorId], references: [id])
+  
+  // Training data
+  documents   Document[]
+  
+  // Conversations
+  conversations Conversation[]
+  
+  // Channel deployments
+  channelAgents ChannelAgent[]
+  
+  // Analytics
+  analytics   AgentAnalytics[]
+
+  @@map("agents")
+}
+
+// Training Documents
+model Document {
+  id          String   @id @default(cuid())
+  name        String
+  originalName String
+  type        DocumentType
+  size        Int
+  path        String
+  content     String?  // Extracted text content
+  metadata    Json?    // Additional metadata
+  status      DocumentStatus @default(PROCESSING)
+  vectorized  Boolean  @default(false)
+  vectorIds   String[] // ChromaDB vector IDs
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Associated agent
+  agentId     String?
+  agent       Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@map("documents")
+}
+
+// Communication Channels
+model Channel {
+  id          String   @id @default(cuid())
+  type        ChannelType
+  name        String
+  config      Json     // Channel-specific configuration
+  credentials Json?    // API keys, tokens, etc.
+  status      ChannelStatus @default(INACTIVE)
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Agent deployments
+  channelAgents ChannelAgent[]
+  
+  // Conversations
+  conversations Conversation[]
+
+  @@map("channels")
+}
+
+model ChannelAgent {
+  id        String   @id @default(cuid())
+  isActive  Boolean  @default(true)
+  config    Json?    // Channel-specific agent configuration
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, agentId])
+  @@map("channel_agents")
+}
+
+// Conversations
+model Conversation {
+  id          String   @id @default(cuid())
+  externalId  String?  // External conversation ID from channel
+  customerName String?
+  customerEmail String?
+  customerPhone String?
+  status      ConversationStatus @default(ACTIVE)
+  priority    ConversationPriority @default(NORMAL)
+  tags        String[]
+  metadata    Json?    // Additional conversation metadata
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Channel
+  channelId   String
+  channel     Channel  @relation(fields: [channelId], references: [id])
+  
+  // Agent
+  agentId     String?
+  agent       Agent?   @relation(fields: [agentId], references: [id])
+  
+  // Assigned user (for human handover)
+  assignedUserId String?
+  assignedUser   User?   @relation(fields: [assignedUserId], references: [id])
+  
+  // Messages
+  messages    Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id            String   @id @default(cuid())
+  content       String
+  type          MessageType @default(TEXT)
+  sender        MessageSender
+  metadata      Json?    // Attachments, reactions, etc.
+  isRead        Boolean  @default(false)
+  sentAt        DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  // Conversation
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+// Analytics
+model Analytics {
+  id        String   @id @default(cuid())
+  date      DateTime
+  metrics   Json     // Daily metrics
+  createdAt DateTime @default(now())
+
+  // Multi-tenant
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, date])
+  @@map("analytics")
+}
+
+model AgentAnalytics {
+  id        String   @id @default(cuid())
+  date      DateTime
+  metrics   Json     // Agent-specific metrics
+  createdAt DateTime @default(now())
+
+  // Agent
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, date])
+  @@map("agent_analytics")
+}
+
+// Subscriptions
+model Subscription {
+  id          String   @id @default(cuid())
+  plan        SubscriptionPlan
+  status      SubscriptionStatus @default(ACTIVE)
+  startDate   DateTime @default(now())
+  endDate     DateTime?
+  billingCycle BillingCycle @default(MONTHLY)
+  amount      Float
+  currency    String   @default("USD")
+  metadata    Json?    // Payment provider data
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// API Keys
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String
+  key       String   @unique
+  permissions Json   // API permissions
+  lastUsed  DateTime?
+  expiresAt DateTime?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// Sessions
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  // User
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// Enums
+enum UserRole {
+  PLATFORM_ADMIN
+  TENANT_ADMIN
+  TENANT_USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum AgentStatus {
+  DRAFT
+  TRAINING
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+enum DocumentType {
+  PDF
+  DOC
+  DOCX
+  TXT
+  CSV
+  JSON
+  HTML
+  MD
+}
+
+enum DocumentStatus {
+  UPLOADING
+  PROCESSING
+  COMPLETED
+  ERROR
+}
+
+enum ChannelType {
+  WHATSAPP
+  FACEBOOK
+  INSTAGRAM
+  TELEGRAM
+  WEBSITE
+  API
+}
+
+enum ChannelStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+  CONFIGURING
+}
+
+enum ConversationStatus {
+  ACTIVE
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+enum ConversationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  AUDIO
+  VIDEO
+  LOCATION
+  CONTACT
+}
+
+enum MessageSender {
+  CUSTOMER
+  AGENT
+  HUMAN
+  SYSTEM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAST_DUE
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
