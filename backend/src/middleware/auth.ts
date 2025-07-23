@@ -7,7 +7,7 @@ import { redis } from '../config/redis';
 import logger from '../utils/logger';
 import { ApiError } from '../utils/errors';
 
-interface JWTPayload {
+export interface JWTPayload {
   userId: string;
   tenantId: string;
   email: string;
@@ -16,7 +16,7 @@ interface JWTPayload {
   exp: number;
 }
 
-interface AuthenticatedRequest extends Request {
+export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
     email: string;
@@ -31,6 +31,7 @@ interface AuthenticatedRequest extends Request {
       status: string;
     };
   };
+  tenantId?: string;
 }
 
 class AuthService {
@@ -285,6 +286,9 @@ export const requireTenant = (req: AuthenticatedRequest, res: Response, next: Ne
     return;
   }
 
+  // Set tenantId on request for easy access
+  req.tenantId = req.user.tenantId;
+
   next();
 };
 
@@ -301,10 +305,9 @@ export const authenticateApiKey = async (
       throw new ApiError(401, 'API key required');
     }
 
-    // Find API key in database
-    const apiKeyRecord = await prisma.apiKey.findUnique({
-      where: { key: apiKey },
-    });
+    // Validate API key using service
+    const apiKeyService = (await import('../services/apiKeyService')).default;
+    const apiKeyRecord = await apiKeyService.validateApiKey(apiKey);
 
     if (!apiKeyRecord) {
       throw new ApiError(401, 'Invalid API key');
@@ -341,11 +344,7 @@ export const authenticateApiKey = async (
       throw new ApiError(401, 'Tenant account is not active');
     }
 
-    // Update last used timestamp
-    await prisma.apiKey.update({
-      where: { id: apiKeyRecord.id },
-      data: { lastUsed: new Date() },
-    });
+    // Last used timestamp is already updated by validateApiKey
 
     // Attach tenant info to request
     req.user = {
@@ -423,6 +422,3 @@ export const rateLimitByUser = (maxRequests: number = 100, windowMs: number = 15
     next();
   };
 };
-
-// Export types
-export type { AuthenticatedRequest, JWTPayload };

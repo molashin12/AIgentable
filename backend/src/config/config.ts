@@ -33,15 +33,24 @@ interface Config {
   chromaPort: number;
   chromaCollectionName: string;
   
+  // AI Provider
+  defaultAIProvider: string;
+  
   // OpenAI
   openaiApiKey: string;
   openaiModel: string;
   openaiEmbeddingModel: string;
   
+  // Gemini
+  geminiApiKey: string;
+  geminiModel: string;
+  geminiEmbeddingModel: string;
+  
   // WhatsApp
   whatsappAccessToken: string;
   whatsappPhoneNumberId: string;
   whatsappWebhookVerifyToken: string;
+  whatsappWebhookSecret: string;
   
   // Facebook
   facebookAppId: string;
@@ -51,6 +60,7 @@ interface Config {
   // Instagram
   instagramAccessToken: string;
   instagramBusinessAccountId: string;
+  instagramAppSecret: string;
   
   // Telegram
   telegramBotToken: string;
@@ -65,6 +75,14 @@ interface Config {
   smtpPort: number;
   smtpUser: string;
   smtpPass: string;
+  smtp: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    pass: string;
+    from: string;
+  };
   email: {
     fromAddress: string;
   };
@@ -163,27 +181,37 @@ export const config: Config = {
   chromaPort: getEnvNumber('CHROMA_PORT', 8000),
   chromaCollectionName: getEnvVar('CHROMA_COLLECTION_NAME', 'aigentable_vectors'),
   
+  // AI Provider Configuration
+  defaultAIProvider: getEnvVar('DEFAULT_AI_PROVIDER', 'openai'),
+  
   // OpenAI Configuration
   openaiApiKey: getEnvVar('OPENAI_API_KEY'),
   openaiModel: getEnvVar('OPENAI_MODEL', 'gpt-4'),
   openaiEmbeddingModel: getEnvVar('OPENAI_EMBEDDING_MODEL', 'text-embedding-ada-002'),
   
+  // Gemini Configuration
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: getEnvVar('GEMINI_MODEL', 'gemini-pro'),
+  geminiEmbeddingModel: getEnvVar('GEMINI_EMBEDDING_MODEL', 'embedding-001'),
+  
   // WhatsApp Configuration
-  whatsappAccessToken: getEnvVar('WHATSAPP_ACCESS_TOKEN', ''),
-  whatsappPhoneNumberId: getEnvVar('WHATSAPP_PHONE_NUMBER_ID', ''),
-  whatsappWebhookVerifyToken: getEnvVar('WHATSAPP_WEBHOOK_VERIFY_TOKEN', ''),
+  whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+  whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+  whatsappWebhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',
+  whatsappWebhookSecret: process.env.WHATSAPP_WEBHOOK_SECRET || '',
   
   // Facebook Configuration
-  facebookAppId: getEnvVar('FACEBOOK_APP_ID', ''),
-  facebookAppSecret: getEnvVar('FACEBOOK_APP_SECRET', ''),
-  facebookPageAccessToken: getEnvVar('FACEBOOK_PAGE_ACCESS_TOKEN', ''),
+  facebookAppId: process.env.FACEBOOK_APP_ID || '',
+  facebookAppSecret: process.env.FACEBOOK_APP_SECRET || '',
+  facebookPageAccessToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
   
   // Instagram Configuration
-  instagramAccessToken: getEnvVar('INSTAGRAM_ACCESS_TOKEN', ''),
-  instagramBusinessAccountId: getEnvVar('INSTAGRAM_BUSINESS_ACCOUNT_ID', ''),
+  instagramAccessToken: process.env.INSTAGRAM_ACCESS_TOKEN || '',
+  instagramBusinessAccountId: process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '',
+  instagramAppSecret: process.env.INSTAGRAM_APP_SECRET || '',
   
   // Telegram Configuration
-  telegramBotToken: getEnvVar('TELEGRAM_BOT_TOKEN', ''),
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   
   // File Upload Configuration
   maxFileSize: getEnvNumber('MAX_FILE_SIZE', 10485760), // 10MB
@@ -193,8 +221,16 @@ export const config: Config = {
   // Email Configuration
   smtpHost: getEnvVar('SMTP_HOST', 'smtp.gmail.com'),
   smtpPort: getEnvNumber('SMTP_PORT', 587),
-  smtpUser: getEnvVar('SMTP_USER', ''),
-  smtpPass: getEnvVar('SMTP_PASS', ''),
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  smtp: {
+    host: getEnvVar('SMTP_HOST', 'smtp.gmail.com'),
+    port: getEnvNumber('SMTP_PORT', 587),
+    secure: getEnvBoolean('SMTP_SECURE', false),
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: getEnvVar('EMAIL_FROM_ADDRESS', 'noreply@aigentable.com'),
+  },
   email: {
     fromAddress: getEnvVar('EMAIL_FROM_ADDRESS', 'noreply@aigentable.com'),
   },
@@ -223,8 +259,8 @@ export const config: Config = {
   sessionMaxAge: getEnvNumber('SESSION_MAX_AGE', 86400000), // 24 hours
   
   // Google Cloud Platform
-  gcpProjectId: getEnvVar('GCP_PROJECT_ID', ''),
-  gcpKeyFile: getEnvVar('GCP_KEY_FILE', ''),
+  gcpProjectId: process.env.GCP_PROJECT_ID || '',
+  gcpKeyFile: process.env.GCP_KEY_FILE || '',
   
   // Monitoring
   sentryDsn: process.env.SENTRY_DSN,

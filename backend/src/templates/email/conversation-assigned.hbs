@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Conversation Assigned</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+        .title {
+            font-size: 24px;
+            color: #1f2937;
+            margin-bottom: 20px;
+        }
+        .content {
+            margin-bottom: 30px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #2563eb;
+            color: #ffffff;
+            padding: 15px 40px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+        .button:hover {
+            background-color: #1d4ed8;
+        }
+        .conversation-info {
+            background-color: #f8fafc;
+            border: 2px solid #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .info-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #4b5563;
+        }
+        .info-value {
+            color: #1f2937;
+        }
+        .priority-high {
+            color: #dc2626;
+            font-weight: bold;
+        }
+        .priority-medium {
+            color: #f59e0b;
+            font-weight: bold;
+        }
+        .priority-low {
+            color: #10b981;
+            font-weight: bold;
+        }
+        .notification-badge {
+            background-color: #10b981;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            color: #6b7280;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">AIgentable</div>
+            <div class="notification-badge">New Assignment</div>
+            <h1 class="title">Conversation Assigned</h1>
+        </div>
+        
+        <div class="content">
+            <p>Hi {{agentName}},</p>
+            
+            <p>A new conversation has been assigned to you. Please review the details below and respond to the customer as soon as possible.</p>
+            
+            <div class="conversation-info">
+                <h3 style="margin-top: 0; color: #1f2937;">📋 Conversation Details</h3>
+                
+                <div class="info-row">
+                    <span class="info-label">Customer:</span>
+                    <span class="info-value">{{customerName}}</span>
+                </div>
+                
+                <div class="info-row">
+                    <span class="info-label">Conversation ID:</span>
+                    <span class="info-value">#{{conversationId}}</span>
+                </div>
+                
+                {{#if priority}}
+                <div class="info-row">
+                    <span class="info-label">Priority:</span>
+                    <span class="info-value priority-{{priority}}">{{priority}}</span>
+                </div>
+                {{/if}}
+                
+                {{#if channel}}
+                <div class="info-row">
+                    <span class="info-label">Channel:</span>
+                    <span class="info-value">{{channel}}</span>
+                </div>
+                {{/if}}
+                
+                <div class="info-row">
+                    <span class="info-label">Assigned:</span>
+                    <span class="info-value">{{assignedAt}}</span>
+                </div>
+            </div>
+            
+            <div style="text-align: center;">
+                <a href="{{conversationUrl}}" class="button">View Conversation</a>
+            </div>
+            
+            <p><strong>💡 Quick Tips:</strong></p>
+            <ul>
+                <li>Respond within your target response time</li>
+                <li>Review any previous conversation history</li>
+                <li>Use available knowledge base resources</li>
+                <li>Escalate to a supervisor if needed</li>
+            </ul>
+            
+            <p>You can access this conversation directly from your dashboard or by clicking the button above. If you have any questions about this assignment, please contact your team lead.</p>
+            
+            <p>Best regards,<br>AIgentable Notification System</p>
+        </div>
+        
+        <div class="footer">
+            <p>This notification was sent because a conversation was assigned to you.</p>
+            <p>You can manage your notification preferences in your account settings.</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Message Received</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+        .title {
+            font-size: 24px;
+            color: #1f2937;
+            margin-bottom: 20px;
+        }
+        .content {
+            margin-bottom: 30px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #10b981;
+            color: #ffffff;
+            padding: 15px 40px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+        .button:hover {
+            background-color: #059669;
+        }
+        .message-preview {
+            background-color: #f0f9ff;
+            border-left: 4px solid #0ea5e9;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .customer-info {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #4b5563;
+        }
+        .info-value {
+            color: #1f2937;
+        }
+        .notification-badge {
+            background-color: #ef4444;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        .urgent {
+            background-color: #fef2f2;
+            border: 2px solid #ef4444;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            color: #6b7280;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">AIgentable</div>
+            <div class="notification-badge">New Message</div>
+            <h1 class="title">💬 New Message from {{customerName}}</h1>
+        </div>
+        
+        <div class="content">
+            <p>Hi {{agentName}},</p>
+            
+            <p>You have received a new message from <strong>{{customerName}}</strong> in one of your assigned conversations.</p>
+            
+            <div class="customer-info">
+                <h3 style="margin-top: 0; color: #1f2937;">👤 Customer Information</h3>
+                
+                <div class="info-row">
+                    <span class="info-label">Customer:</span>
+                    <span class="info-value">{{customerName}}</span>
+                </div>
+                
+                <div class="info-row">
+                    <span class="info-label">Conversation ID:</span>
+                    <span class="info-value">#{{conversationId}}</span>
+                </div>
+                
+                {{#if channel}}
+                <div class="info-row">
+                    <span class="info-label">Channel:</span>
+                    <span class="info-value">{{channel}}</span>
+                </div>
+                {{/if}}
+                
+                <div class="info-row">
+                    <span class="info-label">Received:</span>
+                    <span class="info-value">{{receivedAt}}</span>
+                </div>
+            </div>
+            
+            <div class="message-preview">
+                <h3 style="margin-top: 0; color: #0369a1;">📝 Message Preview</h3>
+                <p style="margin-bottom: 0; font-style: italic;">"{{messagePreview}}"</p>
+            </div>
+            
+            {{#if isUrgent}}
+            <div class="urgent">
+                <p><strong>🚨 Urgent Response Required</strong></p>
+                <p>This message has been flagged as urgent. Please respond as soon as possible.</p>
+            </div>
+            {{/if}}
+            
+            <div style="text-align: center;">
+                <a href="{{conversationUrl}}" class="button">Reply to Message</a>
+            </div>
+            
+            <p><strong>📋 Response Guidelines:</strong></p>
+            <ul>
+                <li>Acknowledge the customer's message promptly</li>
+                <li>Provide helpful and accurate information</li>
+                <li>Use a professional and friendly tone</li>
+                <li>Escalate complex issues when necessary</li>
+                {{#if responseTimeTarget}}
+                <li>Target response time: {{responseTimeTarget}}</li>
+                {{/if}}
+            </ul>
+            
+            <p>Click the button above to view the full conversation and respond to the customer. You can also access this conversation from your dashboard.</p>
+            
+            <p>Best regards,<br>AIgentable Notification System</p>
+        </div>
+        
+        <div class="footer">
+            <p>This notification was sent because you received a new message in an assigned conversation.</p>
+            <p>You can manage your notification preferences in your account settings.</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -2,6 +2,7 @@ import { ChromaClient, OpenAIEmbeddingFunction, Collection, IncludeEnum, Metadat
 import { config } from './config';
 import logger from '../utils/logger';
 import OpenAI from 'openai';
+import { aiProvider, EmbeddingResponse } from '../services/aiProvider';
 
 interface DocumentMetadata {
   tenantId: string;
@@ -313,12 +314,8 @@ class ChromaDBConnection {
 
   public async generateEmbedding(text: string): Promise<number[]> {
     try {
-      const response = await this.openai.embeddings.create({
-        model: config.openaiEmbeddingModel,
-        input: text,
-      });
-      
-      return response.data[0].embedding;
+      const response: EmbeddingResponse = await aiProvider.generateEmbedding(text);
+      return response.embedding;
     } catch (error) {
       logger.error('Failed to generate embedding:', error);
       throw error;
@@ -327,12 +324,8 @@ class ChromaDBConnection {
 
   public async batchGenerateEmbeddings(texts: string[]): Promise<number[][]> {
     try {
-      const response = await this.openai.embeddings.create({
-        model: config.openaiEmbeddingModel,
-        input: texts,
-      });
-      
-      return response.data.map(item => item.embedding);
+      const responses: EmbeddingResponse[] = await aiProvider.generateBatchEmbeddings(texts);
+      return responses.map(response => response.embedding);
     } catch (error) {
       logger.error('Failed to generate batch embeddings:', error);
       throw error;
@@ -395,6 +388,286 @@ class ChromaDBConnection {
     } catch (error) {
       logger.error(`Semantic search failed for tenant ${tenantId}:`, error);
       throw error;
+    }
+  }
+
+  // Hybrid search combining semantic and keyword search
+  public async hybridSearch(
+    tenantId: string,
+    query: string,
+    options: {
+      nResults?: number;
+      agentId?: string;
+      fileType?: string;
+      dateRange?: { start: string; end: string };
+      minSimilarity?: number;
+      keywordWeight?: number;
+      semanticWeight?: number;
+      enableReranking?: boolean;
+    } = {}
+  ): Promise<SearchResult[]> {
+    try {
+      const {
+        nResults = 5,
+        agentId,
+        fileType,
+        dateRange,
+        minSimilarity = 0.6,
+        keywordWeight = 0.3,
+        semanticWeight = 0.7,
+        enableReranking = true
+      } = options;
+
+      // Perform semantic search
+      const semanticResults = await this.semanticSearch(tenantId, query, {
+        nResults: nResults * 3, // Get more results for hybrid scoring
+        agentId,
+        fileType,
+        dateRange,
+        minSimilarity: minSimilarity - 0.1, // Lower threshold for hybrid
+      });
+
+      // Perform keyword search
+      const keywordResults = await this.keywordSearch(tenantId, query, {
+        nResults: nResults * 3,
+        agentId,
+        fileType,
+        dateRange,
+      });
+
+      // Combine and score results
+      const combinedResults = this.combineSearchResults(
+        semanticResults,
+        keywordResults,
+        semanticWeight,
+        keywordWeight
+      );
+
+      // Apply re-ranking if enabled
+      const finalResults = enableReranking 
+        ? await this.rerankResults(combinedResults, query, nResults)
+        : combinedResults.slice(0, nResults);
+
+      logger.info(`Hybrid search completed for tenant ${tenantId}`, {
+        query: query.substring(0, 100),
+        semanticResults: semanticResults.length,
+        keywordResults: keywordResults.length,
+        finalResults: finalResults.length,
+      });
+
+      return finalResults;
+    } catch (error) {
+      logger.error(`Hybrid search failed for tenant ${tenantId}:`, error);
+      throw error;
+    }
+  }
+
+  // Keyword search using document content matching
+  public async keywordSearch(
+    tenantId: string,
+    query: string,
+    options: {
+      nResults?: number;
+      agentId?: string;
+      fileType?: string;
+      dateRange?: { start: string; end: string };
+    } = {}
+  ): Promise<SearchResult[]> {
+    try {
+      const { nResults = 10, agentId, fileType, dateRange } = options;
+      const collection = await this.getTenantCollection(tenantId);
+
+      // Build filter
+      const filter: Record<string, any> = {};
+      if (agentId) filter.agentId = agentId;
+      if (fileType) filter.fileType = fileType;
+      if (dateRange) {
+        filter.uploadedAt = {
+          $gte: dateRange.start,
+          $lte: dateRange.end,
+        };
+      }
+
+      // Get all documents matching the filter
+      const results = await collection.get({
+        where: Object.keys(filter).length > 0 ? filter : undefined,
+        include: [IncludeEnum.Documents, IncludeEnum.Metadatas],
+      });
+
+      if (!results.documents || !results.metadatas) {
+        return [];
+      }
+
+      // Score documents based on keyword matching
+      const queryTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 2);
+      const scoredResults: Array<SearchResult & { keywordScore: number }> = [];
+
+      for (let i = 0; i < results.documents.length; i++) {
+        const document = results.documents[i] || '';
+        const metadata = results.metadatas[i] as unknown as DocumentMetadata;
+        const id = results.ids?.[i] || '';
+
+        // Calculate keyword score
+        const keywordScore = this.calculateKeywordScore(document, queryTerms);
+        
+        if (keywordScore > 0) {
+          scoredResults.push({
+            id,
+            document,
+            metadata,
+            distance: 1 - keywordScore, // Convert score to distance-like metric
+            keywordScore,
+          });
+        }
+      }
+
+      // Sort by keyword score and return top results
+      return scoredResults
+        .sort((a, b) => b.keywordScore - a.keywordScore)
+        .slice(0, nResults)
+        .map(({ keywordScore, ...result }) => result);
+    } catch (error) {
+      logger.error(`Keyword search failed for tenant ${tenantId}:`, error);
+      throw error;
+    }
+  }
+
+  // Calculate keyword matching score
+  private calculateKeywordScore(document: string, queryTerms: string[]): number {
+    const docText = document.toLowerCase();
+    let score = 0;
+    let totalTerms = queryTerms.length;
+
+    for (const term of queryTerms) {
+      // Exact match gets higher score
+      const exactMatches = (docText.match(new RegExp(`\\b${term}\\b`, 'g')) || []).length;
+      score += exactMatches * 2;
+
+      // Partial match gets lower score
+      const partialMatches = (docText.match(new RegExp(term, 'g')) || []).length - exactMatches;
+      score += partialMatches * 0.5;
+    }
+
+    // Normalize score by document length and query terms
+    const normalizedScore = score / (Math.log(docText.length + 1) * totalTerms);
+    return Math.min(normalizedScore, 1); // Cap at 1
+  }
+
+  // Combine semantic and keyword search results
+  private combineSearchResults(
+    semanticResults: SearchResult[],
+    keywordResults: SearchResult[],
+    semanticWeight: number,
+    keywordWeight: number
+  ): SearchResult[] {
+    const resultMap = new Map<string, SearchResult & { combinedScore: number }>();
+
+    // Add semantic results
+    semanticResults.forEach((result, index) => {
+      const semanticScore = 1 - result.distance; // Convert distance to similarity
+      const positionScore = 1 - (index / semanticResults.length); // Position-based score
+      const score = (semanticScore * 0.8 + positionScore * 0.2) * semanticWeight;
+      
+      resultMap.set(result.id, {
+        ...result,
+        combinedScore: score,
+      });
+    });
+
+    // Add or update with keyword results
+    keywordResults.forEach((result, index) => {
+      const keywordScore = 1 - result.distance;
+      const positionScore = 1 - (index / keywordResults.length);
+      const score = (keywordScore * 0.8 + positionScore * 0.2) * keywordWeight;
+      
+      const existing = resultMap.get(result.id);
+      if (existing) {
+        existing.combinedScore += score;
+      } else {
+        resultMap.set(result.id, {
+          ...result,
+          combinedScore: score,
+        });
+      }
+    });
+
+    // Sort by combined score and return
+    return Array.from(resultMap.values())
+      .sort((a, b) => b.combinedScore - a.combinedScore)
+      .map(({ combinedScore, ...result }) => ({
+        ...result,
+        distance: 1 - combinedScore, // Convert back to distance
+      }));
+  }
+
+  // Re-rank results using advanced scoring
+  private async rerankResults(
+    results: SearchResult[],
+    query: string,
+    nResults: number
+  ): Promise<SearchResult[]> {
+    try {
+      // Simple re-ranking based on query relevance and document quality
+      const queryTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 2);
+      
+      const rerankedResults = results.map(result => {
+        let rerankScore = 1 - result.distance; // Base similarity score
+        
+        // Boost score based on document metadata
+        if (result.metadata.fileType === 'pdf') rerankScore *= 1.1; // PDFs often have better content
+        if (result.metadata.chunkIndex === 0) rerankScore *= 1.05; // First chunks often have summaries
+        
+        // Boost score based on document freshness
+        const uploadDate = new Date(result.metadata.uploadedAt);
+        const daysSinceUpload = (Date.now() - uploadDate.getTime()) / (1000 * 60 * 60 * 24);
+        if (daysSinceUpload < 30) rerankScore *= 1.02; // Recent documents get slight boost
+        
+        // Boost score based on document length (not too short, not too long)
+        const docLength = result.document.length;
+        if (docLength > 100 && docLength < 2000) rerankScore *= 1.03;
+        
+        return {
+          ...result,
+          distance: 1 - rerankScore,
+        };
+      });
+      
+      return rerankedResults
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, nResults);
+    } catch (error) {
+      logger.error('Re-ranking failed:', error);
+      // Return original results if re-ranking fails
+      return results.slice(0, nResults);
+    }
+  }
+
+  // Advanced search with multiple strategies
+  public async advancedSearch(
+    tenantId: string,
+    query: string,
+    options: {
+      strategy?: 'semantic' | 'keyword' | 'hybrid';
+      nResults?: number;
+      agentId?: string;
+      fileType?: string;
+      dateRange?: { start: string; end: string };
+      minSimilarity?: number;
+      enableReranking?: boolean;
+      keywordWeight?: number;
+      semanticWeight?: number;
+    } = {}
+  ): Promise<SearchResult[]> {
+    const { strategy = 'hybrid', ...searchOptions } = options;
+    
+    switch (strategy) {
+      case 'semantic':
+        return await this.semanticSearch(tenantId, query, searchOptions);
+      case 'keyword':
+        return await this.keywordSearch(tenantId, query, searchOptions);
+      case 'hybrid':
+      default:
+        return await this.hybridSearch(tenantId, query, searchOptions);
     }
   }
 

@@ -250,6 +250,15 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
     success: true,
     message: 'Token refreshed successfully',
     data: {
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        lastLogin: user.lastLogin,
+      },
+      tenant: user.tenant,
       tokens,
     },
   });

@@ -13,16 +13,16 @@ import {
   AIError,
 } from '../utils/errors';
 import logger from '../utils/logger';
-import OpenAI from 'openai';
 import { config } from '../config/config';
 import { v4 as uuidv4 } from 'uuid';
+import { aiProvider, ChatMessage } from '../services/aiProvider';
+import { getIO } from '../server';
+import { 
+  broadcastDashboardUpdate, 
+  broadcastNotification 
+} from '../sockets/socketHandlers';
 
 const router = express.Router();
-
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: config.openaiApiKey,
-});
 
 // Apply authentication and tenant requirement to all routes
 router.use(authenticate);
@@ -153,6 +153,32 @@ router.post('/', validateBody(agentSchemas.create), asyncHandler(async (req: Aut
     userId: req.user!.id,
   });
 
+  // Emit real-time events
+  try {
+    const io = getIO();
+    
+    // Update dashboard metrics
+    await broadcastDashboardUpdate(io, tenantId);
+    
+    // Send notification about new agent
+    const notification = {
+      id: uuidv4(),
+      type: 'AGENT_CREATED' as const,
+      title: 'New Agent Created',
+      message: `Agent "${agent.name}" has been created and is ready to assist`,
+      data: { agentId: agent.id, agentName: agent.name },
+      createdAt: new Date(),
+      read: false
+    };
+    
+    broadcastNotification(io, tenantId, notification);
+  } catch (error) {
+    logger.error('Failed to emit real-time events for agent creation', {
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+
   res.status(201).json({
     success: true,
     message: 'Agent created successfully',
@@ -206,6 +232,58 @@ router.put('/:id', validateId, validateBody(agentSchemas.update), asyncHandler(a
     tenantId,
     userId: req.user!.id,
   });
+
+  // Emit real-time events
+  try {
+    const io = getIO();
+    
+    // Emit agent status update event
+    io.to(`tenant:${tenantId}`).emit('agent_status_changed', {
+      agentId: agent.id,
+      agentName: agent.name,
+      status: agent.status,
+      isActive: agent.isActive,
+      changes: Object.keys(updateData),
+      timestamp: new Date()
+    });
+    
+    // Update dashboard metrics if status changed
+    if (updateData.status || updateData.isActive !== undefined) {
+      await broadcastDashboardUpdate(io, tenantId);
+    }
+    
+    // Send notification for important status changes
+    if (updateData.status === 'INACTIVE' || updateData.isActive === false) {
+      const notification = {
+        id: uuidv4(),
+        type: 'AGENT_STATUS_CHANGED' as const,
+        title: 'Agent Status Changed',
+        message: `Agent "${agent.name}" is now ${updateData.status === 'INACTIVE' ? 'inactive' : 'offline'}`,
+        data: { agentId: agent.id, agentName: agent.name, status: agent.status },
+        createdAt: new Date(),
+        read: false
+      };
+      
+      broadcastNotification(io, tenantId, notification);
+    } else if (updateData.status === 'ACTIVE' || updateData.isActive === true) {
+      const notification = {
+        id: uuidv4(),
+        type: 'AGENT_STATUS_CHANGED' as const,
+        title: 'Agent Status Changed',
+        message: `Agent "${agent.name}" is now ${updateData.status === 'ACTIVE' ? 'active' : 'online'}`,
+        data: { agentId: agent.id, agentName: agent.name, status: agent.status },
+        createdAt: new Date(),
+        read: false
+      };
+      
+      broadcastNotification(io, tenantId, notification);
+    }
+  } catch (error) {
+    logger.error('Failed to emit real-time events for agent update', {
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 
   res.json({
     success: true,
@@ -387,37 +465,93 @@ router.post('/:id/chat', validateId, validateBody(agentSchemas.chat), asyncHandl
       content: message,
     });
 
-    // Get relevant documents from ChromaDB
+    // Get relevant documents from ChromaDB using advanced search
     let relevantDocs: any[] = [];
+    let searchMetadata: any = {};
     try {
-      relevantDocs = await chromadb.searchDocuments(tenantId, message, 3, {
+      // Use hybrid search for better results
+      relevantDocs = await chromadb.advancedSearch(tenantId, message, {
+        strategy: 'hybrid',
+        nResults: 5,
         agentId: id,
+        minSimilarity: 0.6,
+        enableReranking: true,
+        keywordWeight: 0.3,
+        semanticWeight: 0.7,
+      });
+      
+      searchMetadata = {
+        strategy: 'hybrid',
+        documentsFound: relevantDocs.length,
+        avgSimilarity: relevantDocs.length > 0 
+          ? relevantDocs.reduce((sum, doc) => sum + (1 - doc.distance), 0) / relevantDocs.length 
+          : 0,
+      };
+      
+      // Filter out low-quality results
+      relevantDocs = relevantDocs.filter(doc => (1 - doc.distance) >= 0.6);
+      
+      logger.info('Advanced search completed for agent chat', {
+        agentId: id,
+        tenantId,
+        query: message.substring(0, 100),
+        resultsFound: relevantDocs.length,
+        avgSimilarity: searchMetadata.avgSimilarity,
       });
     } catch (error) {
       logger.warn('Failed to search documents in ChromaDB:', error);
+      // Fallback to basic semantic search if advanced search fails
+      try {
+        relevantDocs = await chromadb.semanticSearch(tenantId, message, {
+          nResults: 3,
+          agentId: id,
+          minSimilarity: 0.7,
+        });
+        searchMetadata = {
+          strategy: 'semantic_fallback',
+          documentsFound: relevantDocs.length,
+        };
+      } catch (fallbackError) {
+        logger.error('Fallback search also failed:', fallbackError);
+      }
     }
 
-    // Prepare system prompt with context
+    // Prepare system prompt with enhanced context
     let systemPrompt = agent.prompt || `You are ${agent.name}, a helpful AI assistant.`;
     
     if (relevantDocs.length > 0) {
-      const contextDocs = relevantDocs.map((doc: any) => doc.document).join('\n\n');
-      systemPrompt += `\n\nRelevant information from knowledge base:\n${contextDocs}`;
+      // Sort by relevance and take top results
+      const sortedDocs = relevantDocs
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 3); // Limit to top 3 for context window
+      
+      const contextDocs = sortedDocs.map((doc: any, index: number) => {
+        const similarity = ((1 - doc.distance) * 100).toFixed(1);
+        const source = doc.metadata?.fileName || 'Unknown source';
+        return `[Source ${index + 1}: ${source} (${similarity}% relevant)]\n${doc.document}`;
+      }).join('\n\n');
+      
+      systemPrompt += `\n\nRelevant information from knowledge base:\n${contextDocs}\n\nPlease use this information to provide accurate and helpful responses. If the information is not directly relevant to the user's question, you may acknowledge this and provide general assistance.`;
     }
 
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
+    // Prepare messages for AI provider
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...conversationHistory.map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      }))
+    ];
+
+    // Call AI provider
+    const completion = await aiProvider.generateChatCompletion(messages, {
       model: agent.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...conversationHistory,
-      ],
       temperature: agent.temperature,
-      max_tokens: agent.maxTokens,
+      maxTokens: agent.maxTokens,
     });
 
-    const aiResponse = completion.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
-    const tokensUsed = completion.usage?.total_tokens || 0;
+    const aiResponse = completion.content || 'I apologize, but I could not generate a response.';
+    const tokensUsed = completion.tokensUsed;
 
     // Save AI response
     const aiMessage = await prisma.message.create({
@@ -427,9 +561,11 @@ router.post('/:id/chat', validateId, validateBody(agentSchemas.chat), asyncHandl
         type: 'TEXT',
         sender: 'AGENT',
         metadata: {
-          model: agent.model,
+          model: completion.model,
+          provider: completion.provider,
           tokensUsed,
           relevantDocs: relevantDocs.length,
+          searchMetadata,
         },
       },
     });
@@ -443,7 +579,7 @@ router.post('/:id/chat', validateId, validateBody(agentSchemas.chat), asyncHandl
     });
 
     // Log AI usage
-    logger.ai('Chat completion', agent.model, tokensUsed, undefined, {
+    logger.ai('Chat completion', completion.model, tokensUsed, completion.provider, {
       agentId: id,
       conversationId: conversation.id,
       tenantId,
@@ -470,7 +606,10 @@ router.post('/:id/chat', validateId, validateBody(agentSchemas.chat), asyncHandl
         metadata: {
           tokensUsed,
           relevantDocs: relevantDocs.length,
-          model: agent.model,
+          model: completion.model,
+          provider: completion.provider,
+          searchStrategy: searchMetadata.strategy,
+          avgSimilarity: searchMetadata.avgSimilarity,
         },
       },
     });
@@ -483,7 +622,7 @@ router.post('/:id/chat', validateId, validateBody(agentSchemas.chat), asyncHandl
     });
 
     if (error instanceof Error && error.message.includes('API key')) {
-      throw new AIError('OpenAI API configuration error');
+      throw new AIError('AI API configuration error');
     } else if (error instanceof Error && error.message.includes('rate limit')) {
       throw new AIError('Rate limit exceeded. Please try again later.');
     } else {
@@ -600,29 +739,29 @@ router.post('/:id/test', validateId, asyncHandler(async (req: AuthenticatedReque
     // Test with a simple message
     const testMessage = 'Hello, this is a test message. Please respond briefly.';
     
-    const completion = await openai.chat.completions.create({
+    const completion = await aiProvider.generateChatCompletion([
+      {
+        role: 'system',
+        content: agent.prompt || `You are ${agent.name}, a helpful AI assistant.`,
+      },
+      {
+        role: 'user',
+        content: testMessage,
+      },
+    ], {
       model: agent.model,
-      messages: [
-        {
-          role: 'system',
-          content: agent.prompt || `You are ${agent.name}, a helpful AI assistant.`,
-        },
-        {
-          role: 'user',
-          content: testMessage,
-        },
-      ],
       temperature: agent.temperature,
-      max_tokens: Math.min(agent.maxTokens, 100), // Limit for test
+      maxTokens: Math.min(agent.maxTokens, 100), // Limit for test
     });
 
-    const response = completion.choices[0]?.message?.content || 'No response generated';
-    const tokensUsed = completion.usage?.total_tokens || 0;
+    const response = completion.content || 'No response generated';
+    const tokensUsed = completion.tokensUsed || 0;
 
-    logger.ai('Agent test', agent.model, tokensUsed, undefined, {
+    logger.ai('Agent test', completion.model, tokensUsed, undefined, {
       agentId: id,
       tenantId,
       userId: req.user!.id,
+      provider: completion.provider,
     });
 
     res.json({
@@ -632,7 +771,8 @@ router.post('/:id/test', validateId, asyncHandler(async (req: AuthenticatedReque
         testMessage,
         response,
         tokensUsed,
-        model: agent.model,
+        model: completion.model,
+        provider: completion.provider,
         responseTime: Date.now(), // Simplified
       },
     });

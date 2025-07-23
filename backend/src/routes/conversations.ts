@@ -15,6 +15,15 @@ import { config } from '../config/config';
 import { chromadb } from '../config/chromadb';
 import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
+import { getIO } from '../server';
+import { 
+  broadcastConversationUpdate, 
+  broadcastDashboardUpdate, 
+  broadcastNotification 
+} from '../sockets/socketHandlers';
+import { messageProcessor } from '../services/messageProcessor';
+import { analyticsService } from '../services/analyticsService';
+import { z } from 'zod';
 
 const router = express.Router();
 const openai = new OpenAI({ apiKey: config.openaiApiKey });
@@ -261,7 +270,42 @@ router.post('/', validateBody(conversationSchemas.create), asyncHandler(async (r
     userId: req.user!.id,
   });
 
-  res.status(201).json({
+  // Emit real-time events
+  try {
+    const io = getIO();
+    
+    // Broadcast conversation creation to tenant users
+    broadcastConversationUpdate(io, conversation.id, {
+      type: 'CONVERSATION_CREATED',
+      conversation,
+      timestamp: new Date()
+    });
+    
+    // Update dashboard metrics
+    await broadcastDashboardUpdate(io, tenantId);
+    
+    // Send notification to assigned agent if any
+    if (agentId) {
+      const notification = {
+        id: uuidv4(),
+        type: 'CONVERSATION_ASSIGNED' as const,
+        title: 'New Conversation Assigned',
+        message: `You have been assigned a new conversation with ${customerName}`,
+        data: { conversationId: conversation.id },
+        createdAt: new Date(),
+        read: false
+      };
+      
+      broadcastNotification(io, tenantId, notification);
+    }
+  } catch (error) {
+    logger.error('Failed to emit real-time events for conversation creation', {
+      conversationId: conversation.id,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+
+  return res.status(201).json({
     success: true,
     message: 'Conversation created successfully',
     data: { conversation },
@@ -323,6 +367,44 @@ router.put('/:id', validateId, validateBody(conversationSchemas.update), asyncHa
     tenantId,
     userId: req.user!.id,
   });
+
+  // Emit real-time events
+  try {
+    const io = getIO();
+    
+    // Broadcast conversation update to tenant users
+    broadcastConversationUpdate(io, id, {
+      type: 'CONVERSATION_UPDATED',
+      conversation,
+      changes: Object.keys(updateData),
+      timestamp: new Date()
+    });
+    
+    // Update dashboard metrics if status changed
+    if (updateData.status) {
+      await broadcastDashboardUpdate(io, tenantId);
+    }
+    
+    // Send notification for important status changes
+    if (updateData.status === 'RESOLVED') {
+      const notification = {
+        id: uuidv4(),
+        type: 'CONVERSATION_RESOLVED' as const,
+        title: 'Conversation Resolved',
+        message: `Conversation with ${conversation.customerName} has been resolved`,
+        data: { conversationId: id },
+        createdAt: new Date(),
+        read: false
+      };
+      
+      broadcastNotification(io, tenantId, notification);
+    }
+  } catch (error) {
+    logger.error('Failed to emit real-time events for conversation update', {
+      conversationId: id,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 
   res.json({
     success: true,
@@ -471,7 +553,58 @@ router.post('/:id/messages', validateId, validateBody(conversationSchemas.sendMe
     userId: req.user!.id,
   });
 
-  res.status(201).json({
+  // Emit real-time events
+  try {
+    const io = getIO();
+    
+    // Broadcast new message to conversation participants and monitors
+    broadcastConversationUpdate(io, id, {
+      type: 'MESSAGE_SENT',
+      message,
+      conversationId: id,
+      timestamp: new Date()
+    });
+    
+    // If AI response was generated, broadcast it too
+    if (aiResponse) {
+      broadcastConversationUpdate(io, id, {
+        type: 'AI_RESPONSE_GENERATED',
+        message: aiResponse,
+        conversationId: id,
+        timestamp: new Date()
+      });
+    }
+    
+    // Update dashboard metrics
+    await broadcastDashboardUpdate(io, tenantId);
+    
+    // Send notification for new customer messages to assigned agent
+    if ((sender || 'CUSTOMER') === 'CUSTOMER' && conversation.agent) {
+      const notification = {
+        id: uuidv4(),
+        type: 'NEW_MESSAGE' as const,
+        title: 'New Customer Message',
+        message: `${conversation.customerName}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`,
+        data: { 
+          conversationId: id,
+          messageId: message.id,
+          customerName: conversation.customerName
+        },
+        createdAt: new Date(),
+        read: false
+      };
+      
+      broadcastNotification(io, tenantId, notification);
+    }
+  } catch (error) {
+    logger.error('Failed to emit real-time events for message', {
+      messageId: message.id,
+      conversationId: id,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+
+  return res.status(201).json({
     success: true,
     message: 'Message sent successfully',
     data: {
@@ -899,6 +1032,273 @@ router.get('/stats/overview', asyncHandler(async (req: AuthenticatedRequest, res
       avgResponseTimeHours: Math.round(avgResponseTime / (1000 * 60 * 60) * 100) / 100,
     },
   });
+}));
+
+// Send message to conversation
+router.post('/:id/messages', validateId, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { content, sender = 'USER', metadata = {} } = req.body;
+  const tenantId = req.user!.tenantId;
+
+  // Validate input
+  const messageSchema = z.object({
+    content: z.string().min(1, 'Message content is required'),
+    sender: z.enum(['USER', 'AGENT', 'SYSTEM']).default('USER'),
+    metadata: z.record(z.any()).default({}),
+  });
+
+  const validation = messageSchema.safeParse({ content, sender, metadata });
+  if (!validation.success) {
+    return res.status(400).json({
+      error: 'Invalid message data',
+      details: validation.error.errors,
+    });
+  }
+
+  // Check if conversation exists and belongs to tenant
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId },
+    include: {
+      agent: true,
+      channel: true,
+    },
+  });
+
+  if (!conversation) {
+    throw new NotFoundError('Conversation');
+  }
+
+  try {
+    // Map sender types to match messageProcessor expectations
+    const senderMapping: Record<string, 'CUSTOMER' | 'AGENT'> = {
+      'USER': 'CUSTOMER',
+      'AGENT': 'AGENT',
+      'SYSTEM': 'AGENT', // System messages are treated as agent messages
+    };
+
+    // Process the message using the message processor service
+    const result = await messageProcessor.processMessage({
+      conversationId: id,
+      agentId: conversation.agentId || '',
+      tenantId,
+      message: validation.data.content,
+      sender: senderMapping[validation.data.sender],
+      metadata: validation.data.metadata,
+    });
+
+    // Update analytics
+    await analyticsService.updateRealTimeMetrics(tenantId, 'message_sent');
+
+    logger.business('Message sent to conversation', {
+      conversationId: id,
+      messageId: result.messageId,
+      sender: validation.data.sender,
+      tenantId,
+      userId: req.user!.id,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Message sent successfully',
+      data: {
+        message: result,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to process message', {
+      conversationId: id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId,
+      userId: req.user!.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to process message',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}));
+
+// Get conversation messages with pagination
+router.get('/:id/messages', validateId, validatePagination, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { page, limit, sortOrder = 'asc' } = req.query;
+  const tenantId = req.user!.tenantId;
+
+  // Check if conversation exists and belongs to tenant
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId },
+  });
+
+  if (!conversation) {
+    throw new NotFoundError('Conversation');
+  }
+
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const [messages, total] = await Promise.all([
+    prisma.message.findMany({
+      where: { conversationId: id },
+      skip,
+      take: Number(limit),
+      orderBy: { createdAt: sortOrder as 'asc' | 'desc' },
+    }),
+    prisma.message.count({ where: { conversationId: id } }),
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      messages,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit)),
+      },
+    },
+  });
+}));
+
+// Generate AI response for conversation
+router.post('/:id/ai-response', validateId, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { prompt, includeContext = true } = req.body;
+  const tenantId = req.user!.tenantId;
+
+  // Check if conversation exists and belongs to tenant
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId },
+    include: {
+      agent: true,
+      channel: true,
+    },
+  });
+
+  if (!conversation) {
+    throw new NotFoundError('Conversation');
+  }
+
+  if (!conversation.agent) {
+    return res.status(400).json({
+      error: 'No agent assigned to this conversation',
+    });
+  }
+
+  try {
+    // Generate AI response using the message processor
+    const response = await messageProcessor.generateAIResponseForConversation({
+      conversationId: id,
+      agentId: conversation.agentId!,
+      prompt: prompt || 'Please provide a helpful response based on the conversation context.',
+      includeContext,
+      tenantId,
+    });
+
+    // Update analytics
+    await analyticsService.updateRealTimeMetrics(tenantId, 'agent_response');
+
+    logger.business('AI response generated for conversation', {
+      conversationId: id,
+      agentId: conversation.agentId,
+      responseLength: response.content.length,
+      tenantId,
+      userId: req.user!.id,
+    });
+
+    return res.json({
+      success: true,
+      message: 'AI response generated successfully',
+      data: { response },
+    });
+  } catch (error) {
+    logger.error('Failed to generate AI response', {
+      conversationId: id,
+      agentId: conversation.agentId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId,
+      userId: req.user!.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to generate AI response',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}));
+
+// Get conversation analytics
+router.get('/:id/analytics', validateId, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const tenantId = req.user!.tenantId;
+
+  // Check if conversation exists and belongs to tenant
+  const conversation = await prisma.conversation.findFirst({
+    where: { id, tenantId },
+  });
+
+  if (!conversation) {
+    throw new NotFoundError('Conversation');
+  }
+
+  try {
+    // Get conversation-specific analytics
+    const [messageStats, responseTimeStats] = await Promise.all([
+      prisma.message.groupBy({
+        by: ['sender'],
+        where: { conversationId: id },
+        _count: { id: true },
+      }),
+      prisma.message.findMany({
+        where: { 
+          conversationId: id,
+          sender: 'AGENT',
+        },
+        select: {
+          createdAt: true,
+          metadata: true,
+        },
+      }),
+    ]);
+
+    // Calculate response times from metadata
+    const responseTimes = responseTimeStats
+      .map(msg => (msg.metadata as any)?.responseTime)
+      .filter(time => typeof time === 'number');
+
+    const avgResponseTime = responseTimes.length > 0
+      ? responseTimes.reduce((sum, time) => sum + time, 0) / responseTimes.length
+      : 0;
+
+    const analytics = {
+      messageStats: messageStats.map(stat => ({
+        sender: stat.sender,
+        count: stat._count.id,
+      })),
+      totalMessages: messageStats.reduce((sum, stat) => sum + stat._count.id, 0),
+      averageResponseTime: Math.round(avgResponseTime),
+      conversationDuration: conversation.updatedAt.getTime() - conversation.createdAt.getTime(),
+      status: conversation.status,
+      priority: conversation.priority,
+    };
+
+    return res.json({
+      success: true,
+      data: { analytics },
+    });
+  } catch (error) {
+    logger.error('Failed to get conversation analytics', {
+      conversationId: id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId,
+      userId: req.user!.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to get conversation analytics',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 }));
 
 export default router;

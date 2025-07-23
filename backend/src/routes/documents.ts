@@ -393,111 +393,275 @@ router.delete('/:id', validateId, asyncHandler(async (req: AuthenticatedRequest,
   });
 }));
 
-// Search documents
-router.post('/search', validateBody(documentSchemas.search), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { query, agentId, limit, type } = req.body;
-  const tenantId = req.user!.tenantId;
-
+// Search documents with advanced capabilities
+router.get('/search', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Build filter for ChromaDB
-    const filter: Record<string, any> = {};
-    if (agentId) filter.agentId = agentId;
-
-    // Search in ChromaDB
-    const searchResults = await chromadb.searchDocuments(tenantId, query, limit, filter);
-
-    // Get unique document IDs
-    const documentIds = [...new Set(searchResults.map(result => result.metadata.documentId))];
-
-    // Get document details from database
-    const documents = await prisma.document.findMany({
-      where: {
-        id: { in: documentIds },
-        tenantId,
-      },
-      include: {
-        agent: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
-
-    // Combine search results with document details
-    const enrichedResults = searchResults.map(result => {
-      const document = documents.find(doc => doc.id === result.metadata.documentId);
-      return {
-        ...result,
-        document: document || null,
-      };
-    }).filter(result => result.document !== null);
-
+    const { 
+      query, 
+      agentId, 
+      fileType, 
+      dateRange, 
+      nResults = 5, 
+      minSimilarity = 0.7,
+      strategy = 'hybrid',
+      enableReranking = 'true',
+      keywordWeight = '0.3',
+      semanticWeight = '0.7'
+    } = req.query;
+    
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: 'Query parameter is required' });
+      return;
+    }
+    
+    // Validate strategy
+    const validStrategies = ['semantic', 'keyword', 'hybrid'];
+    if (!validStrategies.includes(strategy as string)) {
+      res.status(400).json({ 
+        error: `Invalid strategy. Must be one of: ${validStrategies.join(', ')}` 
+      });
+      return;
+    }
+    
+    const searchOptions: any = {
+      strategy: strategy as 'semantic' | 'keyword' | 'hybrid',
+      nResults: parseInt(nResults as string),
+      minSimilarity: parseFloat(minSimilarity as string),
+      enableReranking: enableReranking === 'true',
+    };
+    
+    // Add hybrid-specific options
+    if (strategy === 'hybrid') {
+      searchOptions.keywordWeight = parseFloat(keywordWeight as string);
+      searchOptions.semanticWeight = parseFloat(semanticWeight as string);
+      
+      // Validate weights sum to 1
+      if (Math.abs(searchOptions.keywordWeight + searchOptions.semanticWeight - 1) > 0.01) {
+        res.status(400).json({ 
+          error: 'keywordWeight and semanticWeight must sum to 1.0' 
+        });
+        return;
+      }
+    }
+    
+    if (agentId) searchOptions.agentId = agentId as string;
+    if (fileType) searchOptions.fileType = fileType as string;
+    if (dateRange) {
+      try {
+        searchOptions.dateRange = JSON.parse(dateRange as string);
+      } catch (error) {
+        res.status(400).json({ error: 'Invalid dateRange format' });
+        return;
+      }
+    }
+    
+    const results = await chromadb.advancedSearch(
+      req.user!.tenantId,
+      query,
+      searchOptions
+    );
+    
     res.json({
-      success: true,
-      data: {
-        results: enrichedResults,
-        total: enrichedResults.length,
-        query,
+      query,
+      strategy: searchOptions.strategy,
+      results: results.map(result => ({
+        id: result.id,
+        content: result.document,
+        similarity: 1 - result.distance,
+        metadata: result.metadata,
+      })),
+      total: results.length,
+      searchOptions: {
+        strategy: searchOptions.strategy,
+        nResults: searchOptions.nResults,
+        minSimilarity: searchOptions.minSimilarity,
+        enableReranking: searchOptions.enableReranking,
+        ...(strategy === 'hybrid' && {
+          keywordWeight: searchOptions.keywordWeight,
+          semanticWeight: searchOptions.semanticWeight,
+        }),
       },
     });
   } catch (error) {
-    logger.error('Document search failed:', {
-      query,
-      tenantId,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    // Fallback to database search
-    const documents = await prisma.document.findMany({
-      where: {
-        tenantId,
-        OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { content: { contains: query, mode: 'insensitive' } },
-          { tags: { hasSome: [query] } },
-        ],
-        ...(agentId && { agentId }),
-        ...(type && { type }),
-      },
-      take: limit,
-      include: {
-        agent: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
-
-    res.json({
-      success: true,
-      data: {
-        results: documents.map(doc => ({
-          id: uuidv4(),
-          document: doc.content ? doc.content.substring(0, 500) + '...' : '',
-          metadata: {
-            tenantId,
-            documentId: doc.id,
-            fileName: doc.name,
-            fileType: path.extname(doc.name).substring(1),
-            uploadedAt: doc.createdAt.toISOString(),
-            chunkIndex: 0,
-            totalChunks: 1,
-            source: 'database',
-          },
-          distance: 0.5, // Placeholder
-          fullDocument: doc,
-        })),
-        total: documents.length,
-        query,
-        fallback: true,
-      },
-    });
+    logger.error('Document search failed:', error);
+    res.status(500).json({ error: 'Search failed' });
+    return;
   }
-}));
+});
+
+
+
+// Semantic search endpoint
+router.get('/search/semantic', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { query, agentId, fileType, dateRange, nResults = 5, minSimilarity = 0.7 } = req.query;
+    
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: 'Query parameter is required' });
+      return;
+    }
+    
+    const searchOptions: any = {
+      nResults: parseInt(nResults as string),
+      minSimilarity: parseFloat(minSimilarity as string),
+    };
+    
+    if (agentId) searchOptions.agentId = agentId as string;
+    if (fileType) searchOptions.fileType = fileType as string;
+    if (dateRange) {
+      try {
+        searchOptions.dateRange = JSON.parse(dateRange as string);
+      } catch (error) {
+        res.status(400).json({ error: 'Invalid dateRange format' });
+        return;
+      }
+    }
+    
+    const results = await chromadb.semanticSearch(
+      req.user!.tenantId,
+      query,
+      searchOptions
+    );
+    
+    res.json({
+      query,
+      results: results.map(result => ({
+        id: result.id,
+        content: result.document,
+        similarity: 1 - result.distance,
+        metadata: result.metadata,
+      })),
+      total: results.length,
+    });
+  } catch (error) {
+    logger.error('Semantic search failed:', error);
+    res.status(500).json({ error: 'Search failed' });
+    return;
+  }
+});
+
+// Keyword search endpoint
+router.get('/search/keyword', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { query, agentId, fileType, dateRange, nResults = 10 } = req.query;
+    
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: 'Query parameter is required' });
+      return;
+    }
+    
+    const searchOptions: any = {
+      nResults: parseInt(nResults as string),
+    };
+    
+    if (agentId) searchOptions.agentId = agentId as string;
+    if (fileType) searchOptions.fileType = fileType as string;
+    if (dateRange) {
+      try {
+        searchOptions.dateRange = JSON.parse(dateRange as string);
+      } catch (error) {
+        res.status(400).json({ error: 'Invalid dateRange format' });
+        return;
+      }
+    }
+    
+    const results = await chromadb.keywordSearch(
+      req.user!.tenantId,
+      query,
+      searchOptions
+    );
+    
+    res.json({
+      query,
+      results: results.map(result => ({
+        id: result.id,
+        content: result.document,
+        similarity: 1 - result.distance,
+        metadata: result.metadata,
+      })),
+      total: results.length,
+    });
+  } catch (error) {
+    logger.error('Keyword search failed:', error);
+    res.status(500).json({ error: 'Search failed' });
+    return;
+  }
+});
+
+// Hybrid search endpoint
+router.get('/search/hybrid', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { 
+      query, 
+      agentId, 
+      fileType, 
+      dateRange, 
+      nResults = 5, 
+      minSimilarity = 0.6,
+      keywordWeight = '0.3',
+      semanticWeight = '0.7',
+      enableReranking = 'true'
+    } = req.query;
+    
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: 'Query parameter is required' });
+      return;
+    }
+    
+    const searchOptions: any = {
+      nResults: parseInt(nResults as string),
+      minSimilarity: parseFloat(minSimilarity as string),
+      keywordWeight: parseFloat(keywordWeight as string),
+      semanticWeight: parseFloat(semanticWeight as string),
+      enableReranking: enableReranking === 'true',
+    };
+    
+    // Validate weights sum to 1
+    if (Math.abs(searchOptions.keywordWeight + searchOptions.semanticWeight - 1) > 0.01) {
+      res.status(400).json({ 
+        error: 'keywordWeight and semanticWeight must sum to 1.0' 
+      });
+      return;
+    }
+    
+    if (agentId) searchOptions.agentId = agentId as string;
+    if (fileType) searchOptions.fileType = fileType as string;
+    if (dateRange) {
+      try {
+        searchOptions.dateRange = JSON.parse(dateRange as string);
+      } catch (error) {
+        res.status(400).json({ error: 'Invalid dateRange format' });
+        return;
+      }
+    }
+    
+    const results = await chromadb.hybridSearch(
+      req.user!.tenantId,
+      query,
+      searchOptions
+    );
+    
+    res.json({
+      query,
+      results: results.map(result => ({
+        id: result.id,
+        content: result.document,
+        similarity: 1 - result.distance,
+        metadata: result.metadata,
+      })),
+      total: results.length,
+      searchOptions: {
+        keywordWeight: searchOptions.keywordWeight,
+        semanticWeight: searchOptions.semanticWeight,
+        enableReranking: searchOptions.enableReranking,
+      },
+    });
+  } catch (error) {
+    logger.error('Hybrid search failed:', error);
+    res.status(500).json({ error: 'Search failed' });
+    return;
+  }
+});
 
 // Download document
 router.get('/:id/download', validateId, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

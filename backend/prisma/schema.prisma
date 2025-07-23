@@ -40,8 +40,23 @@ model User {
   conversations Conversation[]
   
   // API Keys
-  apiKeys   ApiKey[]
+  apiKeys     ApiKey[]
+  
+  // Saved searches
+  savedSearches SavedSearch[]
+  
+  // Email verifications
+  emailVerifications EmailVerification[]
+  
+  // User preferences
+  preferences UserPreferences?
 
+  @@index([tenantId])
+  @@index([status])
+  @@index([role])
+  @@index([createdAt])
+  @@index([lastLogin])
+  @@index([tenantId, status])
   @@map("users")
 }
 
@@ -68,6 +83,11 @@ model Tenant {
   channels    Channel[]
   analytics   Analytics[]
   subscriptions Subscription[]
+  
+  // API Keys
+  apiKeys       ApiKey[]
+  
+  savedSearches SavedSearch[]
 
   @@map("tenants")
 }
@@ -109,6 +129,13 @@ model Agent {
   // Analytics
   analytics   AgentAnalytics[]
 
+  @@index([tenantId])
+  @@index([status])
+  @@index([isActive])
+  @@index([creatorId])
+  @@index([createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, isActive])
   @@map("agents")
 }
 
@@ -136,6 +163,14 @@ model Document {
   agentId     String?
   agent       Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
+  @@index([tenantId])
+  @@index([agentId])
+  @@index([status])
+  @@index([type])
+  @@index([vectorized])
+  @@index([createdAt])
+  @@index([tenantId, status])
+  @@index([agentId, status])
   @@map("documents")
 }
 
@@ -217,6 +252,18 @@ model Conversation {
   // Messages
   messages    Message[]
 
+  @@index([tenantId])
+  @@index([status])
+  @@index([priority])
+  @@index([channelId])
+  @@index([agentId])
+  @@index([assignedUserId])
+  @@index([startedAt])
+  @@index([createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, channelId])
+  @@index([customerEmail])
+  @@index([externalId])
   @@map("conversations")
 }
 
@@ -234,6 +281,13 @@ model Message {
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@index([conversationId])
+  @@index([sender])
+  @@index([type])
+  @@index([sentAt])
+  @@index([createdAt])
+  @@index([isRead])
+  @@index([conversationId, sentAt])
   @@map("messages")
 }
 
@@ -289,21 +343,62 @@ model Subscription {
 
 // API Keys
 model ApiKey {
-  id        String   @id @default(cuid())
-  name      String
-  key       String   @unique
-  permissions Json   // API permissions
-  lastUsed  DateTime?
-  expiresAt DateTime?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  keyPrefix   String   // First 12 characters for identification
+  hashedKey   String   @unique // Hashed version of the full key
+  permissions String[] // API permissions array
+  rateLimit   Int      @default(1000)
+  usageCount  Int      @default(0)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // User
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Usage tracking
+  usage       ApiKeyUsage[]
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([isActive])
+  @@index([keyPrefix])
+  @@index([expiresAt])
+  @@index([lastUsedAt])
+  @@index([tenantId, isActive])
   @@map("api_keys")
+}
+
+// API Key Usage Tracking
+model ApiKeyUsage {
+  id           String   @id @default(cuid())
+  endpoint     String
+  method       String
+  statusCode   Int
+  responseTime Int      // in milliseconds
+  userAgent    String?
+  ipAddress    String?
+  timestamp    DateTime @default(now())
+
+  // API Key
+  apiKeyId     String
+  apiKey       ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([apiKeyId])
+  @@index([timestamp])
+  @@index([statusCode])
+  @@index([endpoint])
+  @@index([method])
+  @@index([apiKeyId, timestamp])
+  @@map("api_key_usage")
 }
 
 // Sessions
@@ -317,7 +412,82 @@ model Session {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([createdAt])
   @@map("sessions")
+}
+
+// Saved Searches
+model SavedSearch {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  searchQuery String   // JSON string of search parameters
+  type        String   // 'conversations' | 'messages' | 'global'
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // User
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Multi-tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("saved_searches")
+}
+
+// Email Verification
+model EmailVerification {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  verified  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+// User Preferences
+model UserPreferences {
+  id                    String   @id @default(cuid())
+  emailNotifications    Boolean  @default(true)
+  newMessages           Boolean  @default(true)
+  conversationAssigned  Boolean  @default(true)
+  agentStatusChanges    Boolean  @default(false)
+  systemUpdates         Boolean  @default(true)
+  weeklyReports         Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // User
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// Email Log
+model EmailLog {
+  id         String   @id @default(cuid())
+  recipients String[] // Array of email addresses
+  subject    String
+  template   String?
+  status     String   // 'sent' | 'failed'
+  messageId  String?
+  error      String?
+  sentAt     DateTime @default(now())
+
+  @@map("email_logs")
 }
 
 // Enums

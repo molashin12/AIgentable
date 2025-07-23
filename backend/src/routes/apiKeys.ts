@@ -1,638 +1,405 @@
 import express from 'express';
-import { Request, Response } from 'express';
-import { prisma } from '../config/database';
-import { authenticate, requireTenant, authorize, AuthenticatedRequest } from '../middleware/auth';
-import { validateBody, validateParams, validateQuery, apiKeySchemas, validateId, validatePagination } from '../utils/validation';
-import { asyncHandler } from '../utils/errors';
-import {
-  ApiError,
-  NotFoundError,
-  ValidationError,
-  ConflictError,
-} from '../utils/errors';
+import { z } from 'zod';
+import apiKeyService from '../services/apiKeyService';
+import { authenticate, requireTenant } from '../middleware/auth';
+import { API_PERMISSIONS, ApiPermission } from '../middleware/apiKeyAuth';
+import { validateQuery, validateBody } from '../middleware/validation';
 import logger from '../utils/logger';
-import crypto from 'crypto';
 
 const router = express.Router();
 
-// Apply authentication to all routes
-router.use(authenticate);
-router.use(requireTenant);
-router.use(authorize('ADMIN')); // Only admins can manage API keys
+// Validation schemas
+const createApiKeySchema = z.object({
+  name: z.string().min(1).max(100),
+  permissions: z.array(z.string()).min(1),
+  rateLimit: z.number().int().min(1).max(10000).optional(),
+  expiresAt: z.string().datetime().optional().transform(val => val ? new Date(val) : undefined),
+});
 
-// Get all API keys
-router.get('/', 
-  validatePagination,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { page, limit, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-    const { status, search } = req.query;
-    const tenantId = req.user!.tenantId;
+const updateApiKeySchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  permissions: z.array(z.string()).min(1).optional(),
+  rateLimit: z.number().int().min(1).max(10000).optional(),
+  isActive: z.boolean().optional(),
+  expiresAt: z.string().datetime().optional().transform(val => val ? new Date(val) : undefined),
+});
 
-    const skip = (Number(page) - 1) * Number(limit);
-    
-    // Build where clause - filter by user's tenant through user relation
-    const where: any = {
-      user: {
-        tenantId: tenantId
+const listApiKeysSchema = z.object({
+  userId: z.string().optional(),
+  page: z.string().transform(val => parseInt(val) || 1).optional(),
+  limit: z.string().transform(val => Math.min(parseInt(val) || 20, 100)).optional(),
+});
+
+const statsQuerySchema = z.object({
+  days: z.string().transform(val => Math.min(parseInt(val) || 30, 365)).optional(),
+});
+
+/**
+ * POST /api/api-keys
+ * Generate a new API key
+ */
+router.post('/',
+  authenticate,
+  requireTenant,
+  validateBody(createApiKeySchema),
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const { name, permissions, rateLimit, expiresAt } = req.body;
+      const tenantId = req.tenant.id;
+      const userId = req.user.id;
+      
+      // Validate permissions
+      const validPermissions = Object.values(API_PERMISSIONS);
+      const invalidPermissions = permissions.filter((p: string) => !validPermissions.includes(p as ApiPermission));
+      
+      if (invalidPermissions.length > 0) {
+        return res.status(400).json({
+          error: 'Invalid permissions',
+          message: `Invalid permissions: ${invalidPermissions.join(', ')}`,
+          validPermissions,
+        });
       }
-    };
-    if (status) where.isActive = status === 'ACTIVE';
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    const [apiKeys, total] = await Promise.all([
-      prisma.apiKey.findMany({
-        where,
-        skip,
-        take: Number(limit),
-        orderBy: { [sortBy as string]: sortOrder },
-        select: {
-          id: true,
-          name: true,
-          permissions: true,
-          isActive: true,
-          expiresAt: true,
-          createdAt: true,
-          updatedAt: true,
-          lastUsed: true,
-          userId: true,
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
+      
+      const result = await apiKeyService.generateApiKey(tenantId, userId, {
+        name,
+        permissions,
+        rateLimit,
+        expiresAt,
+      });
+      
+      res.status(201).json({
+        message: 'API key generated successfully',
+        apiKey: {
+          id: result.apiKey.id,
+          name: result.apiKey.name,
+          keyPrefix: result.apiKey.keyPrefix,
+          permissions: result.apiKey.permissions,
+          rateLimit: result.apiKey.rateLimit,
+          expiresAt: result.apiKey.expiresAt,
+          createdAt: result.apiKey.createdAt,
         },
-      }),
-      prisma.apiKey.count({ where }),
-    ]);
+        key: result.plainKey, // Only returned once
+        warning: 'Store this key securely. It will not be shown again.',
+      });
+    } catch (error) {
+      logger.error('Failed to generate API key', { error, tenantId: req.tenant?.id });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to generate API key',
+      });
+    }
+  }
+);
 
-    res.json({
-      success: true,
-      data: {
-        apiKeys,
+/**
+ * GET /api/api-keys
+ * List API keys for the tenant
+ */
+router.get('/',
+  authenticate,
+  requireTenant,
+  validateQuery(listApiKeysSchema),
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const { userId, page = 1, limit = 20 } = req.query;
+      const tenantId = req.tenant.id;
+      
+      const apiKeys = await apiKeyService.listApiKeys(tenantId, userId);
+      
+      // Paginate results
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedKeys = apiKeys.slice(startIndex, endIndex);
+      
+      // Remove sensitive data
+      const sanitizedKeys = paginatedKeys.map(key => ({
+        id: key.id,
+        name: key.name,
+        keyPrefix: key.keyPrefix,
+        permissions: key.permissions,
+        rateLimit: key.rateLimit,
+        usageCount: key.usageCount,
+        lastUsedAt: key.lastUsedAt,
+        expiresAt: key.expiresAt,
+        isActive: key.isActive,
+        createdAt: key.createdAt,
+        updatedAt: key.updatedAt,
+      }));
+      
+      res.json({
+        apiKeys: sanitizedKeys,
         pagination: {
-          page: Number(page),
-          limit: Number(limit),
-          total,
-          pages: Math.ceil(total / Number(limit)),
-        },
-      },
-    });
-  })
-);
-
-// Get API key by ID
-router.get('/:id', 
-  validateId,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const tenantId = req.user!.tenantId;
-
-    const apiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
-        }
-      },
-      select: {
-        id: true,
-        name: true,
-        permissions: true,
-        isActive: true,
-        expiresAt: true,
-        createdAt: true,
-        updatedAt: true,
-        lastUsed: true,
-        userId: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
-    });
-
-    if (!apiKey) {
-      throw new NotFoundError('API key');
-    }
-
-    res.json({
-      success: true,
-      data: { apiKey },
-    });
-  })
-);
-
-// Create new API key
-router.post('/', 
-  validateBody(apiKeySchemas.create),
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { name, permissions, expiresAt, description } = req.body;
-    const tenantId = req.user!.tenantId;
-    const userId = req.user!.id;
-
-    // Check if API key name already exists for this tenant
-    const existingApiKey = await prisma.apiKey.findFirst({
-      where: {
-        name,
-        user: {
-          tenantId: tenantId
-        }
-      },
-    });
-
-    if (existingApiKey) {
-      throw new ConflictError('API key with this name already exists');
-    }
-
-    // Generate API key
-    const keyValue = `ak_${crypto.randomBytes(32).toString('hex')}`;
-
-    // Create API key record
-    const apiKey = await prisma.apiKey.create({
-      data: {
-        name,
-        key: keyValue,
-        permissions: permissions || ['read'],
-        isActive: true,
-        userId: userId,
-        ...(expiresAt && { expiresAt: new Date(expiresAt) }),
-      },
-      select: {
-        id: true,
-        name: true,
-        permissions: true,
-        isActive: true,
-        expiresAt: true,
-        createdAt: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
-    });
-
-    logger.security('API key created', {
-      apiKeyId: apiKey.id,
-      name,
-      permissions,
-      tenantId,
-      createdBy: userId,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'API key created successfully',
-      data: { 
-        apiKey,
-        key: keyValue, // Only returned once during creation
-        warning: 'Please save this key securely. It will not be shown again.',
-      },
-    });
-  })
-);
-
-// Update API key
-router.put('/:id', 
-  validateId,
-  validateBody(apiKeySchemas.update),
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const tenantId = req.user!.tenantId;
-    const updateData = req.body;
-    const userId = req.user!.id;
-
-    // Check if API key exists and belongs to tenant
-    const existingApiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
-        }
-      },
-    });
-
-    if (!existingApiKey) {
-      throw new NotFoundError('API key');
-    }
-
-    // Check if name is being changed and if it's already taken
-    if (updateData.name && updateData.name !== existingApiKey.name) {
-      const nameExists = await prisma.apiKey.findFirst({
-        where: {
-          name: updateData.name,
-          user: {
-            tenantId: tenantId
-          },
-          id: { not: id },
+          page,
+          limit,
+          total: apiKeys.length,
+          totalPages: Math.ceil(apiKeys.length / limit),
+          hasNext: endIndex < apiKeys.length,
+          hasPrev: page > 1,
         },
       });
-      if (nameExists) {
-        throw new ConflictError('API key name already exists');
+    } catch (error) {
+      logger.error('Failed to list API keys', { error, tenantId: req.tenant?.id });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to list API keys',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/api-keys/:id
+ * Get API key details
+ */
+router.get('/:id',
+  authenticate,
+  requireTenant,
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenant.id;
+      
+      const apiKeys = await apiKeyService.listApiKeys(tenantId);
+      const apiKey = apiKeys.find(key => key.id === id);
+      
+      if (!apiKey) {
+        return res.status(404).json({
+          error: 'API key not found',
+          message: 'The specified API key does not exist or does not belong to your tenant',
+        });
       }
-    }
-
-    // Update API key
-    const apiKey = await prisma.apiKey.update({
-      where: { id },
-      data: {
-        ...updateData,
-        updatedAt: new Date(),
-      },
-      select: {
-        id: true,
-        name: true,
-        permissions: true,
-        isActive: true,
-        expiresAt: true,
-        createdAt: true,
-        updatedAt: true,
-        lastUsed: true,
-        userId: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
-    });
-
-    logger.security('API key updated', {
-      apiKeyId: id,
-      changes: Object.keys(updateData),
-      tenantId,
-      updatedBy: userId,
-    });
-
-    res.json({
-      success: true,
-      message: 'API key updated successfully',
-      data: { apiKey },
-    });
-  })
-);
-
-// Delete API key
-router.delete('/:id', 
-  validateId,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const tenantId = req.user!.tenantId;
-    const userId = req.user!.id;
-
-    // Check if API key exists and belongs to tenant
-    const apiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
-        }
-      },
-    });
-
-    if (!apiKey) {
-      throw new NotFoundError('API key');
-    }
-
-    // Delete API key
-    await prisma.apiKey.delete({
-      where: { id },
-    });
-
-    logger.security('API key deleted', {
-      apiKeyId: id,
-      name: apiKey.name,
-      tenantId,
-      deletedBy: userId,
-    });
-
-    res.json({
-      success: true,
-      message: 'API key deleted successfully',
-    });
-  })
-);
-
-// Regenerate API key
-router.post('/:id/regenerate', 
-  validateId,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const tenantId = req.user!.tenantId;
-    const userId = req.user!.id;
-
-    // Check if API key exists and belongs to tenant
-    const existingApiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
-        }
-      },
-    });
-
-    if (!existingApiKey) {
-      throw new NotFoundError('API key');
-    }
-
-    // Generate new API key
-    const keyValue = `ak_${crypto.randomBytes(32).toString('hex')}`;
-
-    // Update API key with new key
-    const apiKey = await prisma.apiKey.update({
-      where: { id },
-      data: {
-        key: keyValue,
-        updatedAt: new Date(),
-        lastUsed: null, // Reset usage tracking
-      },
-      select: {
-        id: true,
-        name: true,
-        permissions: true,
-        isActive: true,
-        expiresAt: true,
-        createdAt: true,
-        updatedAt: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
-    });
-
-    logger.security('API key regenerated', {
-      apiKeyId: id,
-      name: existingApiKey.name,
-      tenantId,
-      regeneratedBy: userId,
-    });
-
-    res.json({
-      success: true,
-      message: 'API key regenerated successfully',
-      data: { 
-        apiKey,
-        key: keyValue, // Only returned once
-        warning: 'Please save this key securely. The old key is now invalid.',
-      },
-    });
-  })
-);
-
-// Update API key status (activate/deactivate)
-router.patch('/:id/status', 
-  validateId,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const { status } = req.body;
-    const tenantId = req.user!.tenantId;
-    const userId = req.user!.id;
-
-    if (!['ACTIVE', 'INACTIVE'].includes(status)) {
-      throw new ValidationError('Invalid status. Must be ACTIVE or INACTIVE');
-    }
-
-    // Check if API key exists and belongs to tenant
-    const existingApiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
-        }
-      },
-    });
-
-    if (!existingApiKey) {
-      throw new NotFoundError('API key');
-    }
-
-    // Update status
-    const apiKey = await prisma.apiKey.update({
-      where: { id },
-      data: {
-        isActive: status === 'ACTIVE',
-        updatedAt: new Date(),
-      },
-      select: {
-        id: true,
-        name: true,
-        permissions: true,
-        isActive: true,
-        expiresAt: true,
-        createdAt: true,
-        updatedAt: true,
-        lastUsed: true,
-        userId: true,
-      },
-    });
-
-    logger.security('API key status changed', {
-      apiKeyId: id,
-      oldStatus: existingApiKey.isActive ? 'ACTIVE' : 'INACTIVE',
-      newStatus: status,
-      tenantId,
-      changedBy: userId,
-    });
-
-    res.json({
-      success: true,
-      message: `API key ${status.toLowerCase()} successfully`,
-      data: { apiKey },
-    });
-  })
-);
-
-// Get API key usage statistics
-router.get('/:id/usage', 
-  validateId,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const { period = '30d' } = req.query;
-    const tenantId = req.user!.tenantId;
-
-    // Check if API key exists and belongs to tenant
-    const apiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
-        }
-      },
-      select: {
-        id: true,
-        name: true,
-        lastUsed: true,
-        createdAt: true,
-      },
-    });
-
-    if (!apiKey) {
-      throw new NotFoundError('API key');
-    }
-
-    // Calculate date range
-    const now = new Date();
-    let startDate: Date;
-    
-    switch (period) {
-      case '7d':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30d':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90d':
-        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    }
-
-    // In a real implementation, you would track API usage in a separate table
-    // For now, we'll return basic usage information
-    const usage = {
-      apiKey: {
+      
+      res.json({
         id: apiKey.id,
         name: apiKey.name,
-      },
-      period,
-      totalUsage: 0, // Would be tracked in separate usage table
-      lastUsed: apiKey.lastUsed,
-      createdAt: apiKey.createdAt,
-      // Mock data for demonstration
-      periodUsage: 0,
-      dailyUsage: [], // Would contain daily usage statistics
-      topEndpoints: [], // Would contain most used endpoints
-      errorRate: 0, // Would contain error rate statistics
-    };
-
-    res.json({
-      success: true,
-      data: { usage },
-    });
-  })
+        keyPrefix: apiKey.keyPrefix,
+        permissions: apiKey.permissions,
+        rateLimit: apiKey.rateLimit,
+        usageCount: apiKey.usageCount,
+        lastUsedAt: apiKey.lastUsedAt,
+        expiresAt: apiKey.expiresAt,
+        isActive: apiKey.isActive,
+        createdAt: apiKey.createdAt,
+        updatedAt: apiKey.updatedAt,
+      });
+    } catch (error) {
+      logger.error('Failed to get API key', { error, apiKeyId: req.params.id });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to get API key details',
+      });
+    }
+  }
 );
 
-// Test API key (validate without incrementing usage)
-router.post('/:id/test', 
-  validateId,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const tenantId = req.user!.tenantId;
-
-    // Check if API key exists and belongs to tenant
-    const apiKey = await prisma.apiKey.findFirst({
-      where: { 
-        id, 
-        user: {
-          tenantId: tenantId
+/**
+ * PUT /api/api-keys/:id
+ * Update API key
+ */
+router.put('/:id',
+  authenticate,
+  requireTenant,
+  validateBody(updateApiKeySchema),
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenant.id;
+      const updates = req.body;
+      
+      // Verify API key belongs to tenant
+      const apiKeys = await apiKeyService.listApiKeys(tenantId);
+      const apiKey = apiKeys.find(key => key.id === id);
+      
+      if (!apiKey) {
+        return res.status(404).json({
+          error: 'API key not found',
+          message: 'The specified API key does not exist or does not belong to your tenant',
+        });
+      }
+      
+      // Validate permissions if provided
+      if (updates.permissions) {
+        const validPermissions = Object.values(API_PERMISSIONS);
+        const invalidPermissions = updates.permissions.filter((p: string) => !validPermissions.includes(p as ApiPermission));
+        
+        if (invalidPermissions.length > 0) {
+          return res.status(400).json({
+            error: 'Invalid permissions',
+            message: `Invalid permissions: ${invalidPermissions.join(', ')}`,
+            validPermissions,
+          });
         }
-      },
-      select: {
-        id: true,
-        name: true,
-        isActive: true,
-        expiresAt: true,
-        permissions: true,
-      },
-    });
-
-    if (!apiKey) {
-      throw new NotFoundError('API key');
+      }
+      
+      const updatedKey = await apiKeyService.updateApiKey(id, updates);
+      
+      res.json({
+        message: 'API key updated successfully',
+        apiKey: {
+          id: updatedKey.id,
+          name: updatedKey.name,
+          keyPrefix: updatedKey.keyPrefix,
+          permissions: updatedKey.permissions,
+          rateLimit: updatedKey.rateLimit,
+          usageCount: updatedKey.usageCount,
+          lastUsedAt: updatedKey.lastUsedAt,
+          expiresAt: updatedKey.expiresAt,
+          isActive: updatedKey.isActive,
+          createdAt: updatedKey.createdAt,
+          updatedAt: updatedKey.updatedAt,
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to update API key', { error, apiKeyId: req.params.id });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to update API key',
+      });
     }
-
-    // Check if API key is valid
-    const now = new Date();
-    const isValid = apiKey.isActive && 
-                   (!apiKey.expiresAt || apiKey.expiresAt > now);
-
-    const testResult = {
-      apiKey: {
-        id: apiKey.id,
-        name: apiKey.name,
-      },
-      isValid,
-      status: apiKey.isActive ? 'ACTIVE' : 'INACTIVE',
-      expiresAt: apiKey.expiresAt,
-      permissions: apiKey.permissions,
-      issues: [] as string[],
-    };
-
-    // Add issues if any
-    if (!apiKey.isActive) {
-      testResult.issues.push('API key is INACTIVE');
-    }
-    if (apiKey.expiresAt && apiKey.expiresAt <= now) {
-      testResult.issues.push('API key has expired');
-    }
-
-    logger.security('API key tested', {
-      apiKeyId: id,
-      isValid,
-      tenantId,
-      testedBy: req.user!.id,
-    });
-
-    res.json({
-      success: true,
-      data: { test: testResult },
-    });
-  })
+  }
 );
 
-// Get API key permissions info
-router.get('/permissions/info', 
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const availablePermissions = {
-      read: {
-        name: 'Read',
-        description: 'Read access to resources',
-        endpoints: ['GET /api/*'],
-      },
-      write: {
-        name: 'Write',
-        description: 'Create and update resources',
-        endpoints: ['POST /api/*', 'PUT /api/*', 'PATCH /api/*'],
-      },
-      delete: {
-        name: 'Delete',
-        description: 'Delete resources',
-        endpoints: ['DELETE /api/*'],
-      },
-      admin: {
-        name: 'Admin',
-        description: 'Full administrative access',
-        endpoints: ['ALL /api/*'],
-      },
-    };
-
-    res.json({
-      success: true,
-      data: { permissions: availablePermissions },
-    });
-  })
+/**
+ * DELETE /api/api-keys/:id
+ * Delete (deactivate) API key
+ */
+router.delete('/:id',
+  authenticate,
+  requireTenant,
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const tenantId = req.tenant.id;
+      
+      // Verify API key belongs to tenant
+      const apiKeys = await apiKeyService.listApiKeys(tenantId);
+      const apiKey = apiKeys.find(key => key.id === id);
+      
+      if (!apiKey) {
+        return res.status(404).json({
+          error: 'API key not found',
+          message: 'The specified API key does not exist or does not belong to your tenant',
+        });
+      }
+      
+      await apiKeyService.deleteApiKey(id);
+      
+      res.json({
+        message: 'API key deleted successfully',
+      });
+    } catch (error) {
+      logger.error('Failed to delete API key', { error, apiKeyId: req.params.id });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to delete API key',
+      });
+    }
+  }
 );
+
+/**
+ * GET /api/api-keys/:id/stats
+ * Get API key usage statistics
+ */
+router.get('/:id/stats',
+  authenticate,
+  requireTenant,
+  validateQuery(statsQuerySchema),
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const { days = 30 } = req.query;
+      const tenantId = req.tenant.id;
+      
+      // Verify API key belongs to tenant
+      const apiKeys = await apiKeyService.listApiKeys(tenantId);
+      const apiKey = apiKeys.find(key => key.id === id);
+      
+      if (!apiKey) {
+        return res.status(404).json({
+          error: 'API key not found',
+          message: 'The specified API key does not exist or does not belong to your tenant',
+        });
+      }
+      
+      const stats = await apiKeyService.getApiKeyStats(id, days);
+      
+      res.json({
+        apiKeyId: id,
+        period: {
+          days,
+          startDate: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+          endDate: new Date().toISOString(),
+        },
+        stats,
+      });
+    } catch (error) {
+      logger.error('Failed to get API key stats', { error, apiKeyId: req.params.id });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to get API key statistics',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/api-keys/permissions
+ * Get available permissions
+ */
+router.get('/permissions',
+  authenticate,
+  requireTenant,
+  // @ts-ignore
+  async (req: any, res): Promise<any> => {
+    try {
+      const permissions = Object.entries(API_PERMISSIONS).map(([key, value]) => ({
+        key,
+        value,
+        description: getPermissionDescription(value),
+      }));
+      
+      res.json({
+        permissions,
+      });
+    } catch (error) {
+      logger.error('Failed to get permissions', { error });
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to get available permissions',
+      });
+    }
+  }
+);
+
+/**
+ * Helper function to get permission descriptions
+ */
+function getPermissionDescription(permission: string): string {
+  const descriptions: Record<string, string> = {
+    'conversations:read': 'Read conversations and their details',
+    'conversations:write': 'Create and update conversations',
+    'conversations:delete': 'Delete conversations',
+    'messages:read': 'Read messages within conversations',
+    'messages:write': 'Send and update messages',
+    'messages:delete': 'Delete messages',
+    'analytics:read': 'Access analytics and reporting data',
+    'webhooks:read': 'Read webhook configurations',
+    'webhooks:write': 'Create and update webhook configurations',
+    'users:read': 'Read user information',
+    'users:write': 'Create and update user information',
+    'admin:read': 'Read administrative data',
+    'admin:write': 'Perform administrative actions',
+    '*': 'Full access to all resources and actions',
+  };
+  
+  return descriptions[permission] || 'Unknown permission';
+}
 
 export default router;

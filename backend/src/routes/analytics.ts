@@ -1,860 +1,482 @@
-import express from 'express';
-import { Request, Response } from 'express';
-import { prisma } from '../config/database';
-import { authenticate, requireTenant, AuthenticatedRequest } from '../middleware/auth';
-import { validateQuery, analyticsSchemas, validateDateRange } from '../utils/validation';
-import { asyncHandler } from '../utils/errors';
-import {
-  ApiError,
-  NotFoundError,
-  ValidationError,
-} from '../utils/errors';
+import * as express from 'express';
+import { Response } from 'express';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { analyticsService, AnalyticsTimeRange } from '../services/analyticsService';
 import logger from '../utils/logger';
-import { config } from '../config/config';
+import { validateQuery, analyticsSchemas } from '../utils/validation';
+import * as Joi from 'joi';
 
 const router = express.Router();
 
-// Apply authentication and tenant requirement to all routes
+// Apply authentication middleware to all routes
 router.use(authenticate);
-router.use(requireTenant);
 
-// Helper function to get date range
-const getDateRange = (period: string, startDate?: string, endDate?: string) => {
-  const now = new Date();
-  let start: Date;
-  let end: Date = now;
+// Validation schemas
+const timeRangeSchema = Joi.object({
+  startDate: Joi.date().iso().required(),
+  endDate: Joi.date().iso().required(),
+  period: Joi.string().valid('hour', 'day', 'week', 'month', 'year').default('day'),
+});
 
-  if (startDate && endDate) {
-    start = new Date(startDate);
-    end = new Date(endDate);
-  } else {
-    switch (period) {
-      case '1h':
-        start = new Date(now.getTime() - 60 * 60 * 1000);
-        break;
-      case '24h':
-        start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        break;
-      case '7d':
-        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30d':
-        start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90d':
-        start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      case '1y':
-        start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+const agentAnalyticsSchema = Joi.object({
+  agentId: Joi.string().optional(),
+  startDate: Joi.date().iso().required(),
+  endDate: Joi.date().iso().required(),
+  period: Joi.string().valid('hour', 'day', 'week', 'month', 'year').default('day'),
+});
+
+const reportSchema = Joi.object({
+  includeAgents: Joi.boolean().default(true),
+  startDate: Joi.date().iso().required(),
+  endDate: Joi.date().iso().required(),
+  period: Joi.string().valid('hour', 'day', 'week', 'month', 'year').default('day'),
+});
+
+/**
+ * @route GET /api/analytics/conversations
+ * @desc Get conversation analytics for a tenant
+ * @access Private
+ */
+router.get('/conversations', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
     }
-  }
 
-  return { start, end };
-};
+    // Validate query parameters
+    const { error, value } = timeRangeSchema.validate(req.query);
+    if (error) {
+      return res.status(400).json({
+        error: 'Invalid query parameters',
+        details: error.details,
+      });
+    }
 
-// Helper function to generate time series data
-const generateTimeSeries = (start: Date, end: Date, interval: string) => {
-  const series = [];
-  const current = new Date(start);
-  
-  let incrementMs: number;
-  switch (interval) {
-    case 'hour':
-      incrementMs = 60 * 60 * 1000;
-      break;
-    case 'day':
-      incrementMs = 24 * 60 * 60 * 1000;
-      break;
-    case 'week':
-      incrementMs = 7 * 24 * 60 * 60 * 1000;
-      break;
-    case 'month':
-      incrementMs = 30 * 24 * 60 * 60 * 1000;
-      break;
-    default:
-      incrementMs = 24 * 60 * 60 * 1000;
-  }
+    const timeRange: AnalyticsTimeRange = {
+      startDate: value.startDate,
+      endDate: value.endDate,
+      period: value.period,
+    };
 
-  while (current <= end) {
-    series.push(new Date(current));
-    current.setTime(current.getTime() + incrementMs);
-  }
+    const analytics = await analyticsService.getConversationAnalytics(tenantId, timeRange);
 
-  return series;
-};
-
-// Dashboard overview analytics
-router.get('/dashboard', validateQuery(analyticsSchemas.query), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { period = '7d', startDate, endDate } = req.query;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  const [conversationStats, messageStats, agentStats, channelStats, customerStats] = await Promise.all([
-    // Conversation statistics
-    prisma.conversation.aggregate({
-      where: {
-        tenantId,
-        createdAt: { gte: start, lte: end },
-      },
-      _count: true,
-    }),
-    
-    // Message statistics
-    prisma.message.aggregate({
-      where: {
-        conversation: { tenantId },
-        createdAt: { gte: start, lte: end },
-      },
-      _count: true,
-    }),
-    
-    // Agent performance
-    prisma.agent.findMany({
-      where: { tenantId, isActive: true },
-      include: {
-        _count: {
-          select: {
-            conversations: {
-              where: {
-                createdAt: { gte: start, lte: end },
-              },
-            },
-          },
-        },
-      },
-    }),
-    
-    // Channel performance
-    prisma.channel.findMany({
-      where: { tenantId, isActive: true },
-      include: {
-        _count: {
-          select: {
-            conversations: {
-              where: {
-                createdAt: { gte: start, lte: end },
-              },
-            },
-          },
-        },
-      },
-    }),
-    
-    // Unique customers
-    prisma.conversation.findMany({
-      where: {
-        tenantId,
-        createdAt: { gte: start, lte: end },
-      },
-      select: {
-        customerEmail: true,
-        customerPhone: true,
-      },
-      distinct: ['customerEmail', 'customerPhone'],
-    }),
-  ]);
-
-  // Calculate response times
-  const resolvedConversations = await prisma.conversation.findMany({
-    where: {
+    logger.info('Conversation analytics retrieved', {
       tenantId,
-      createdAt: { gte: start, lte: end },
-      status: 'RESOLVED',
-    },
-    select: {
-      createdAt: true,
-      endedAt: true,
-    },
-  });
+      timeRange,
+      userId: req.user?.id,
+    });
 
-  const avgResponseTime = resolvedConversations.length > 0
-    ? resolvedConversations.reduce((sum: number, conv: any) => {
-        const responseTime = conv.endedAt ? conv.endedAt.getTime() - conv.createdAt.getTime() : 0;
-        return sum + responseTime;
-      }, 0) / resolvedConversations.length
-    : 0;
-
-  // Get conversation status breakdown
-  const statusBreakdown = await prisma.conversation.groupBy({
-    by: ['status'],
-    where: {
-      tenantId,
-      createdAt: { gte: start, lte: end },
-    },
-    _count: true,
-  });
-
-  // Get priority breakdown
-  const priorityBreakdown = await prisma.conversation.groupBy({
-    by: ['priority'],
-    where: {
-      tenantId,
-      createdAt: { gte: start, lte: end },
-    },
-    _count: true,
-  });
-
-  res.json({
-    success: true,
-    data: {
-      period,
-      dateRange: { start, end },
-      overview: {
-        totalConversations: conversationStats._count,
-        totalMessages: messageStats._count,
-        uniqueCustomers: customerStats.length,
-        avgResponseTimeMs: Math.round(avgResponseTime),
-        avgResponseTimeHours: Math.round(avgResponseTime / (1000 * 60 * 60) * 100) / 100,
-      },
-      conversationsByStatus: statusBreakdown.map((stat: any) => ({
-        status: stat.status,
-        count: stat._count,
-        percentage: Math.round((stat._count / conversationStats._count) * 100),
-      })),
-      conversationsByPriority: priorityBreakdown.map((stat: any) => ({
-        priority: stat.priority,
-        count: stat._count,
-        percentage: Math.round((stat._count / conversationStats._count) * 100),
-      })),
-      agentPerformance: agentStats.map((agent: any) => ({
-        id: agent.id,
-        name: agent.name,
-        conversations: agent._count.conversations,
-        isActive: agent.isActive,
-      })),
-      channelPerformance: channelStats.map((channel: any) => ({
-        id: channel.id,
-        name: channel.name,
-        type: channel.type,
-        conversations: channel._count.conversations,
-        isActive: channel.isActive,
-      })),
-    },
-  });
-}));
-
-// Conversation analytics
-router.get('/conversations', validateQuery(analyticsSchemas.conversations), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { period = '7d', startDate, endDate, interval = 'day', channelId, agentId } = req.query;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  // Build where clause
-  const where: any = {
-    tenantId,
-    createdAt: { gte: start, lte: end },
-  };
-  if (channelId) where.channelId = channelId;
-  if (agentId) where.agentId = agentId;
-
-  const [totalStats, statusStats, priorityStats, timeSeries] = await Promise.all([
-    // Total statistics
-    prisma.conversation.aggregate({
-      where,
-      _count: true,
-    }),
-    
-    // Status breakdown
-    prisma.conversation.groupBy({
-      by: ['status'],
-      where,
-      _count: true,
-    }),
-    
-    // Priority breakdown
-    prisma.conversation.groupBy({
-      by: ['priority'],
-      where,
-      _count: true,
-    }),
-    
-    // Time series data
-    prisma.$queryRaw`
-      SELECT 
-        DATE_TRUNC(${interval}, "createdAt") as date,
-        COUNT(*) as count,
-        COUNT(CASE WHEN status = 'RESOLVED' THEN 1 END) as resolved,
-        COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END) as active
-      FROM "Conversation"
-      WHERE "tenantId" = ${tenantId}
-        AND "createdAt" >= ${start}
-        AND "createdAt" <= ${end}
-        ${channelId ? `AND "channelId" = ${channelId}` : ''}
-        ${agentId ? `AND "agentId" = ${agentId}` : ''}
-      GROUP BY DATE_TRUNC(${interval}, "createdAt")
-      ORDER BY date
-    `,
-  ]);
-
-  res.json({
-    success: true,
-    data: {
-      period,
-      dateRange: { start, end },
-      total: totalStats._count,
-      byStatus: statusStats.map((stat: any) => ({
-        status: stat.status,
-        count: stat._count,
-        percentage: Math.round((stat._count / totalStats._count) * 100),
-      })),
-      byPriority: priorityStats.map((stat: any) => ({
-        priority: stat.priority,
-        count: stat._count,
-        percentage: Math.round((stat._count / totalStats._count) * 100),
-      })),
-      timeSeries: timeSeries,
-    },
-  });
-}));
-
-// Message analytics
-router.get('/messages', validateQuery(analyticsSchemas.messages), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { period = '7d', startDate, endDate, interval = 'day', channelId, agentId } = req.query;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  // Build where clause
-  const where: any = {
-    conversation: { tenantId },
-    createdAt: { gte: start, lte: end },
-  };
-  if (channelId) where.conversation.channelId = channelId;
-  if (agentId) where.conversation.agentId = agentId;
-
-  const [totalStats, senderStats, typeStats, timeSeries] = await Promise.all([
-    // Total statistics
-    prisma.message.aggregate({
-      where,
-      _count: true,
-    }),
-    
-    // Sender breakdown
-    prisma.message.groupBy({
-      by: ['sender'],
-      where,
-      _count: true,
-    }),
-    
-    // Message type breakdown
-    prisma.message.groupBy({
-      by: ['type'],
-      where,
-      _count: true,
-    }),
-    
-    // Time series data
-    prisma.$queryRaw`
-      SELECT 
-        DATE_TRUNC(${interval}, m."createdAt") as date,
-        COUNT(*) as count,
-        COUNT(CASE WHEN m.sender = 'CUSTOMER' THEN 1 END) as customer_messages,
-        COUNT(CASE WHEN m.sender = 'AGENT' THEN 1 END) as agent_messages,
-        COUNT(CASE WHEN m.sender = 'SYSTEM' THEN 1 END) as system_messages
-      FROM "Message" m
-      JOIN "Conversation" c ON m."conversationId" = c.id
-      WHERE c."tenantId" = ${tenantId}
-        AND m."createdAt" >= ${start}
-        AND m."createdAt" <= ${end}
-        ${channelId ? `AND c."channelId" = ${channelId}` : ''}
-        ${agentId ? `AND c."agentId" = ${agentId}` : ''}
-      GROUP BY DATE_TRUNC(${interval}, m."createdAt")
-      ORDER BY date
-    `,
-  ]);
-
-  res.json({
-    success: true,
-    data: {
-      period,
-      dateRange: { start, end },
-      total: totalStats._count,
-      bySender: senderStats.map((stat: any) => ({
-        sender: stat.sender,
-        count: stat._count,
-        percentage: Math.round((stat._count / totalStats._count) * 100),
-      })),
-      byType: typeStats.map((stat: any) => ({
-        type: stat.type,
-        count: stat._count,
-        percentage: Math.round((stat._count / totalStats._count) * 100),
-      })),
-      timeSeries: timeSeries,
-    },
-  });
-}));
-
-// Agent performance analytics
-router.get('/agents', validateQuery(analyticsSchemas.agents), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { period = '7d', startDate, endDate, agentId } = req.query;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  // Build where clause
-  const where: any = {
-    tenantId,
-    createdAt: { gte: start, lte: end },
-  };
-  if (agentId) where.agentId = agentId;
-
-  const agents = await prisma.agent.findMany({
-    where: {
-      tenantId,
-      ...(agentId && { id: agentId as string }),
-    },
-    include: {
-      _count: {
-        select: {
-          conversations: {
-            where: {
-              createdAt: { gte: start, lte: end },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const agentPerformance = await Promise.all(
-    agents.map(async (agent: any) => {
-      const [conversationStats, messageStats, responseTimeStats] = await Promise.all([
-        // Conversation statistics
-        prisma.conversation.aggregate({
-          where: {
-            agentId: agent.id,
-            createdAt: { gte: start, lte: end },
-          },
-          _count: true,
-        }),
-        
-        // Message statistics
-        prisma.message.aggregate({
-          where: {
-            conversation: {
-              agentId: agent.id,
-            },
-            sender: 'AGENT',
-            createdAt: { gte: start, lte: end },
-          },
-          _count: true,
-        }),
-        
-        // Response time calculation
-        prisma.conversation.findMany({
-          where: {
-            agentId: agent.id,
-            createdAt: { gte: start, lte: end },
-            status: 'RESOLVED',
-          },
-          select: {
-            createdAt: true,
-            endedAt: true,
-          },
-        }),
-      ]);
-
-      const avgResponseTime = responseTimeStats.length > 0
-        ? responseTimeStats.reduce((sum: number, conv: any) => {
-            const responseTime = conv.endedAt ? conv.endedAt.getTime() - conv.createdAt.getTime() : 0;
-            return sum + responseTime;
-          }, 0) / responseTimeStats.length
-        : 0;
-
-      // Get conversation status breakdown for this agent
-      const statusBreakdown = await prisma.conversation.groupBy({
-        by: ['status'],
-        where: {
-          agentId: agent.id,
-          createdAt: { gte: start, lte: end },
-        },
-        _count: true,
-      });
-
-      return {
-        id: agent.id,
-        name: agent.name,
-        isActive: agent.isActive,
-        conversations: conversationStats._count,
-        messages: messageStats._count,
-        avgResponseTimeMs: Math.round(avgResponseTime),
-        avgResponseTimeHours: Math.round(avgResponseTime / (1000 * 60 * 60) * 100) / 100,
-        statusBreakdown: statusBreakdown.map((stat: any) => ({
-          status: stat.status,
-          count: stat._count,
-        })),
-      };
-    })
-  );
-
-  res.json({
-    success: true,
-    data: {
-      period,
-      dateRange: { start, end },
-      agents: agentPerformance,
-    },
-  });
-}));
-
-// Channel performance analytics
-router.get('/channels', validateQuery(analyticsSchemas.channels), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { period = '7d', startDate, endDate, channelId } = req.query;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  const channels = await prisma.channel.findMany({
-    where: {
-      tenantId,
-      ...(channelId && { id: channelId as string }),
-    },
-    include: {
-      _count: {
-        select: {
-          conversations: {
-            where: {
-              createdAt: { gte: start, lte: end },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const channelPerformance = await Promise.all(
-    channels.map(async (channel: any) => {
-      const [conversationStats, messageStats, customerStats] = await Promise.all([
-        // Conversation statistics
-        prisma.conversation.aggregate({
-          where: {
-            channelId: channel.id,
-            createdAt: { gte: start, lte: end },
-          },
-          _count: true,
-        }),
-        
-        // Message statistics
-        prisma.message.aggregate({
-          where: {
-            conversation: {
-              channelId: channel.id,
-            },
-            createdAt: { gte: start, lte: end },
-          },
-          _count: true,
-        }),
-        
-        // Unique customers
-        prisma.conversation.findMany({
-          where: {
-            channelId: channel.id,
-            createdAt: { gte: start, lte: end },
-          },
-          select: {
-            customerEmail: true,
-            customerPhone: true,
-          },
-          distinct: ['customerEmail', 'customerPhone'],
-        }),
-      ]);
-
-      // Get conversation status breakdown for this channel
-      const statusBreakdown = await prisma.conversation.groupBy({
-        by: ['status'],
-        where: {
-          channelId: channel.id,
-          createdAt: { gte: start, lte: end },
-        },
-        _count: true,
-      });
-
-      return {
-        id: channel.id,
-        name: channel.name,
-        type: channel.type,
-        isActive: channel.isActive,
-        conversations: conversationStats._count,
-        messages: messageStats._count,
-        uniqueCustomers: customerStats.length,
-        statusBreakdown: statusBreakdown.map((stat: any) => ({
-          status: stat.status,
-          count: stat._count,
-        })),
-      };
-    })
-  );
-
-  res.json({
-    success: true,
-    data: {
-      period,
-      dateRange: { start, end },
-      channels: channelPerformance,
-    },
-  });
-}));
-
-// Customer analytics
-router.get('/customers', validateQuery(analyticsSchemas.customers), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { period = '7d', startDate, endDate } = req.query;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  const [newCustomers, returningCustomers, topCustomers, customerActivity] = await Promise.all([
-    // New customers (first conversation in period)
-    prisma.$queryRaw`
-      SELECT COUNT(DISTINCT COALESCE("customerEmail", "customerPhone")) as count
-      FROM "Conversation" c1
-      WHERE c1."tenantId" = ${tenantId}
-        AND c1."createdAt" >= ${start}
-        AND c1."createdAt" <= ${end}
-        AND NOT EXISTS (
-          SELECT 1 FROM "Conversation" c2
-          WHERE c2."tenantId" = ${tenantId}
-            AND COALESCE(c2."customerEmail", c2."customerPhone") = COALESCE(c1."customerEmail", c1."customerPhone")
-            AND c2."createdAt" < ${start}
-        )
-    `,
-    
-    // Returning customers
-    prisma.$queryRaw`
-      SELECT COUNT(DISTINCT COALESCE("customerEmail", "customerPhone")) as count
-      FROM "Conversation" c1
-      WHERE c1."tenantId" = ${tenantId}
-        AND c1."createdAt" >= ${start}
-        AND c1."createdAt" <= ${end}
-        AND EXISTS (
-          SELECT 1 FROM "Conversation" c2
-          WHERE c2."tenantId" = ${tenantId}
-            AND COALESCE(c2."customerEmail", c2."customerPhone") = COALESCE(c1."customerEmail", c1."customerPhone")
-            AND c2."createdAt" < ${start}
-        )
-    `,
-    
-    // Top customers by conversation count
-    prisma.$queryRaw`
-      SELECT 
-        COALESCE("customerEmail", "customerPhone") as customer,
-        "customerName",
-        COUNT(*) as conversation_count,
-        MAX("createdAt") as last_conversation
-      FROM "Conversation"
-      WHERE "tenantId" = ${tenantId}
-        AND "createdAt" >= ${start}
-        AND "createdAt" <= ${end}
-        AND COALESCE("customerEmail", "customerPhone") IS NOT NULL
-      GROUP BY COALESCE("customerEmail", "customerPhone"), "customerName"
-      ORDER BY conversation_count DESC
-      LIMIT 10
-    `,
-    
-    // Customer activity by channel
-    prisma.$queryRaw`
-      SELECT 
-        ch.name as channel_name,
-        ch.type as channel_type,
-        COUNT(DISTINCT COALESCE(c."customerEmail", c."customerPhone")) as unique_customers
-      FROM "Conversation" c
-      JOIN "Channel" ch ON c."channelId" = ch.id
-      WHERE c."tenantId" = ${tenantId}
-        AND c."createdAt" >= ${start}
-        AND c."createdAt" <= ${end}
-      GROUP BY ch.id, ch.name, ch.type
-      ORDER BY unique_customers DESC
-    `,
-  ]);
-
-  res.json({
-    success: true,
-    data: {
-      period,
-      dateRange: { start, end },
-      newCustomers: (newCustomers as any)[0]?.count || 0,
-      returningCustomers: (returningCustomers as any)[0]?.count || 0,
-      topCustomers: topCustomers,
-      customersByChannel: customerActivity,
-    },
-  });
-}));
-
-// Export analytics data
-router.post('/export', validateQuery(analyticsSchemas.export), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { type, period = '7d', startDate, endDate, format = 'json' } = req.body;
-  const tenantId = req.user!.tenantId;
-  const { start, end } = getDateRange(period as string, startDate as string, endDate as string);
-
-  let data: any = {};
-
-  switch (type) {
-    case 'conversations':
-      data = await prisma.conversation.findMany({
-        where: {
-          tenantId,
-          createdAt: { gte: start, lte: end },
-        },
-        include: {
-          channel: {
-            select: { name: true, type: true },
-          },
-          agent: {
-            select: { name: true },
-          },
-          _count: {
-            select: { messages: true },
-          },
-        },
-      });
-      break;
-
-    case 'messages':
-      data = await prisma.message.findMany({
-        where: {
-          conversation: { tenantId },
-          createdAt: { gte: start, lte: end },
-        },
-        include: {
-          conversation: {
-            select: {
-              customerName: true,
-              customerEmail: true,
-              channel: {
-                select: { name: true, type: true },
-              },
-            },
-          },
-        },
-      });
-      break;
-
-    case 'agents':
-      data = await prisma.agent.findMany({
-        where: { tenantId },
-        include: {
-          _count: {
-            select: {
-              conversations: {
-                where: {
-                  createdAt: { gte: start, lte: end },
-                },
-              },
-            },
-          },
-        },
-      });
-      break;
-
-    case 'channels':
-      data = await prisma.channel.findMany({
-        where: { tenantId },
-        include: {
-          _count: {
-            select: {
-              conversations: {
-                where: {
-                  createdAt: { gte: start, lte: end },
-                },
-              },
-            },
-          },
-        },
-      });
-      break;
-
-    default:
-      throw new ValidationError('Invalid export type');
-  }
-
-  logger.business('Analytics data exported', {
-    type,
-    period,
-    format,
-    recordCount: Array.isArray(data) ? data.length : 1,
-    tenantId,
-    userId: req.user!.id,
-  });
-
-  if (format === 'csv') {
-    // Convert to CSV format
-    const csv = convertToCSV(data);
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${type}_${period}.csv"`);
-    res.send(csv);
-  } else {
-    res.json({
+    return res.json({
       success: true,
-      data: {
-        type,
-        period,
-        dateRange: { start, end },
-        records: data,
-        count: Array.isArray(data) ? data.length : 1,
-      },
+      data: analytics,
+      timeRange,
+    });
+  } catch (error) {
+    logger.error('Failed to get conversation analytics', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to retrieve conversation analytics',
+      message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
-}));
+});
 
-// Helper function to convert data to CSV
-const convertToCSV = (data: Record<string, any>[]): string => {
-  if (!data || data.length === 0) return '';
-  
-  const headers = Object.keys(data[0]);
-  const csvRows = [headers.join(',')];
-  
-  for (const row of data) {
-    const values = headers.map(header => {
-      const value = row[header];
-      if (value === null || value === undefined) return '';
-      if (typeof value === 'object') return JSON.stringify(value).replace(/"/g, '""');
-      return `"${String(value).replace(/"/g, '""')}"`;
+/**
+ * @route GET /api/analytics/agents
+ * @desc Get agent analytics for a tenant
+ * @access Private
+ */
+router.get('/agents', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    // Validate query parameters
+    const { error, value } = agentAnalyticsSchema.validate(req.query);
+    if (error) {
+      return res.status(400).json({
+        error: 'Invalid query parameters',
+        details: error.details,
+      });
+    }
+
+    const timeRange: AnalyticsTimeRange = {
+      startDate: value.startDate,
+      endDate: value.endDate,
+      period: value.period,
+    };
+
+    const analytics = await analyticsService.getAgentAnalytics(
+      tenantId,
+      value.agentId,
+      timeRange
+    );
+
+    logger.info('Agent analytics retrieved', {
+      tenantId,
+      agentId: value.agentId,
+      timeRange,
+      userId: req.user?.id,
     });
-    csvRows.push(values.join(','));
+
+    return res.json({
+      success: true,
+      data: analytics,
+      timeRange,
+    });
+  } catch (error) {
+    logger.error('Failed to get agent analytics', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to retrieve agent analytics',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
-  
-  return csvRows.join('\n');
-};
+});
 
-// Real-time analytics (for dashboard updates)
-router.get('/realtime', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const tenantId = req.user!.tenantId;
-  const now = new Date();
-  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+/**
+ * @route GET /api/analytics/agents/:agentId
+ * @desc Get analytics for a specific agent
+ * @access Private
+ */
+router.get('/agents/:agentId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const { agentId } = req.params;
 
-  const [activeConversations, recentMessages, onlineAgents] = await Promise.all([
-    // Active conversations
-    prisma.conversation.count({
-      where: {
-        tenantId,
-        status: 'ACTIVE',
-      },
-    }),
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    // Validate query parameters
+    const { error, value } = timeRangeSchema.validate(req.query);
+    if (error) {
+      return res.status(400).json({
+        error: 'Invalid query parameters',
+        details: error.details,
+      });
+    }
+
+    const timeRange: AnalyticsTimeRange = {
+      startDate: value.startDate,
+      endDate: value.endDate,
+      period: value.period,
+    };
+
+    const analytics = await analyticsService.getAgentAnalytics(tenantId, agentId, timeRange);
+
+    if (analytics.length === 0) {
+      return res.status(404).json({ error: 'Agent not found or no data available' });
+    }
+
+    logger.info('Specific agent analytics retrieved', {
+      tenantId,
+      agentId,
+      timeRange,
+      userId: req.user?.id,
+    });
+
+    return res.json({
+      success: true,
+      data: analytics[0], // Return single agent data
+      timeRange,
+    });
+  } catch (error) {
+    logger.error('Failed to get specific agent analytics', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      agentId: req.params.agentId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to retrieve agent analytics',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * @route GET /api/analytics/dashboard
+ * @desc Get dashboard metrics for a tenant
+ * @access Private
+ */
+router.get('/dashboard', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    const metrics = await analyticsService.getDashboardMetrics(tenantId);
+
+    logger.info('Dashboard metrics retrieved', {
+      tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.json({
+      success: true,
+      data: metrics,
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    logger.error('Failed to get dashboard metrics', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to retrieve dashboard metrics',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * @route POST /api/analytics/metrics/update
+ * @desc Trigger real-time metrics update
+ * @access Private
+ */
+router.post('/metrics/update', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    const { event } = req.body;
+    const validEvents = ['conversation_created', 'message_sent', 'conversation_completed', 'agent_response'];
     
-    // Messages in last hour
-    prisma.message.count({
-      where: {
-        conversation: { tenantId },
-        createdAt: { gte: oneHourAgo },
-      },
-    }),
-    
-    // Active agents (simplified - would need session tracking)
-    prisma.agent.count({
-      where: {
-        tenantId,
-        isActive: true,
-      },
-    }),
-  ]);
+    if (!event || !validEvents.includes(event)) {
+      return res.status(400).json({
+        error: 'Invalid event type',
+        validEvents,
+      });
+    }
 
-  res.json({
-    success: true,
-    data: {
-      timestamp: now,
-      activeConversations,
-      recentMessages,
-      onlineAgents,
-    },
-  });
-}));
+    await analyticsService.updateRealTimeMetrics(tenantId, event);
+
+    logger.info('Real-time metrics updated', {
+      tenantId,
+      event,
+      userId: req.user?.id,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Metrics updated successfully',
+      event,
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    logger.error('Failed to update real-time metrics', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to update metrics',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * @route GET /api/analytics/report
+ * @desc Generate comprehensive analytics report
+ * @access Private
+ */
+router.get('/report', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    // Validate query parameters
+    const { error, value } = reportSchema.validate(req.query);
+    if (error) {
+      return res.status(400).json({
+        error: 'Invalid query parameters',
+        details: error.details,
+      });
+    }
+
+    const timeRange: AnalyticsTimeRange = {
+      startDate: value.startDate,
+      endDate: value.endDate,
+      period: value.period,
+    };
+
+    const report = await analyticsService.generateAnalyticsReport(
+      tenantId,
+      timeRange,
+      value.includeAgents
+    );
+
+    logger.info('Analytics report generated', {
+      tenantId,
+      timeRange,
+      includeAgents: value.includeAgents,
+      userId: req.user?.id,
+    });
+
+    return res.json({
+      success: true,
+      data: report,
+      timeRange,
+    });
+  } catch (error) {
+    logger.error('Failed to generate analytics report', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to generate analytics report',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * @route GET /api/analytics/export
+ * @desc Export analytics data in various formats
+ * @access Private
+ */
+router.get('/export', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    const { format = 'json' } = req.query;
+    const validFormats = ['json', 'csv'];
+    
+    if (!validFormats.includes(format as string)) {
+      return res.status(400).json({
+        error: 'Invalid export format',
+        validFormats,
+      });
+    }
+
+    // Validate time range parameters
+    const { error, value } = timeRangeSchema.validate(req.query);
+    if (error) {
+      return res.status(400).json({
+        error: 'Invalid query parameters',
+        details: error.details,
+      });
+    }
+
+    const timeRange: AnalyticsTimeRange = {
+      startDate: value.startDate,
+      endDate: value.endDate,
+      period: value.period,
+    };
+
+    const report = await analyticsService.generateAnalyticsReport(tenantId, timeRange, true);
+
+    if (format === 'csv') {
+      // Convert to CSV format (simplified implementation)
+      const csvData = [
+        'Metric,Value',
+        `Total Conversations,${report.conversations.totalConversations}`,
+        `Active Conversations,${report.conversations.activeConversations}`,
+        `Completed Conversations,${report.conversations.completedConversations}`,
+        `Average Response Time,${report.conversations.averageResponseTime}`,
+        `Total Messages,${report.conversations.messageVolume.total}`,
+        `User Messages,${report.conversations.messageVolume.userMessages}`,
+        `Agent Messages,${report.conversations.messageVolume.agentMessages}`,
+      ].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="analytics-${tenantId}-${Date.now()}.csv"`);
+      return res.send(csvData);
+    } else {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="analytics-${tenantId}-${Date.now()}.json"`);
+      return res.json(report);
+    }
+
+    logger.info('Analytics data exported', {
+      tenantId,
+      format,
+      timeRange,
+      userId: req.user?.id,
+    });
+  } catch (error) {
+    logger.error('Failed to export analytics data', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(500).json({
+      error: 'Failed to export analytics data',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * @route GET /api/analytics/health
+ * @desc Check analytics service health
+ * @access Private
+ */
+router.get('/health', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant ID is required' });
+    }
+
+    // Simple health check - try to get dashboard metrics
+    const startTime = Date.now();
+    await analyticsService.getDashboardMetrics(tenantId);
+    const responseTime = Date.now() - startTime;
+
+    return res.json({
+      success: true,
+      status: 'healthy',
+      responseTime: `${responseTime}ms`,
+      timestamp: new Date(),
+      services: {
+        analytics: 'operational',
+        cache: 'operational',
+        database: 'operational',
+      },
+    });
+  } catch (error) {
+    logger.error('Analytics health check failed', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tenantId: req.user?.tenantId,
+      userId: req.user?.id,
+    });
+
+    return res.status(503).json({
+      success: false,
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date(),
+    });
+  }
+});
 
 export default router;

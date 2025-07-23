@@ -1,6 +1,7 @@
 import express from 'express';
 import { Request, Response } from 'express';
 import { prisma } from '../config/database';
+import { chromadb } from '../config/chromadb';
 import { authenticate, requireTenant, authorize, AuthenticatedRequest } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery, tenantSchemas, validateId, validatePagination } from '../utils/validation';
 import { asyncHandler } from '../utils/errors';
@@ -10,6 +11,7 @@ import {
   ValidationError,
   ConflictError,
   AuthorizationError,
+  InternalServerError,
 } from '../utils/errors';
 import logger from '../utils/logger';
 import { config } from '../config/config';
@@ -444,7 +446,7 @@ router.post('/api-keys',
         isActive: true,
         expiresAt: true,
         createdAt: true,
-        lastUsed: true,
+        lastUsedAt: true,
       },
     });
 
@@ -494,7 +496,7 @@ router.get('/api-keys',
           isActive: true,
           expiresAt: true,
           createdAt: true,
-          lastUsed: true,
+          lastUsedAt: true,
           userId: true,
         },
       }),
@@ -555,7 +557,7 @@ router.put('/api-keys/:id',
         isActive: true,
         expiresAt: true,
         createdAt: true,
-        lastUsed: true,
+        lastUsedAt: true,
       },
     });
 
@@ -701,6 +703,126 @@ router.get('/activity',
         },
       },
     });
+  })
+);
+
+// Delete tenant (super admin only - dangerous operation)
+router.delete('/:id', 
+  authorize('SUPER_ADMIN'), // Only super admins can delete tenants
+  validateId,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const { confirm } = req.body;
+
+    // Require explicit confirmation
+    if (confirm !== 'DELETE_TENANT') {
+      throw new ValidationError('Confirmation required. Set confirm: "DELETE_TENANT" in request body.');
+    }
+
+    // Check if tenant exists
+    const tenant = await prisma.tenant.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            users: true,
+            agents: true,
+            conversations: true,
+            documents: true,
+            channels: true,
+          },
+        },
+      },
+    });
+
+    if (!tenant) {
+      throw new NotFoundError('Tenant');
+    }
+
+    try {
+      // Start transaction for safe deletion
+      await prisma.$transaction(async (tx) => {
+        // Delete all related data in correct order
+        await tx.message.deleteMany({ where: { conversation: { tenantId: id } } });
+        await tx.conversation.deleteMany({ where: { tenantId: id } });
+        await tx.document.deleteMany({ where: { tenantId: id } });
+        await tx.channel.deleteMany({ where: { tenantId: id } });
+        await tx.agent.deleteMany({ where: { tenantId: id } });
+        await tx.apiKey.deleteMany({ where: { user: { tenantId: id } } });
+        await tx.subscription.deleteMany({ where: { tenantId: id } });
+        await tx.user.deleteMany({ where: { tenantId: id } });
+        
+        // Finally delete the tenant
+        await tx.tenant.delete({ where: { id } });
+      });
+
+      // Clean up ChromaDB collection
+      try {
+        await chromadb.deleteCollection(id);
+        logger.info(`ChromaDB collection deleted for tenant ${id}`);
+      } catch (chromaError) {
+        logger.warn(`Failed to delete ChromaDB collection for tenant ${id}:`, chromaError);
+        // Don't fail the entire operation if ChromaDB cleanup fails
+      }
+
+      logger.security('Tenant deleted', {
+        tenantId: id,
+        tenantName: tenant.name,
+        deletedBy: req.user!.id,
+        counts: tenant._count,
+      });
+
+      res.json({
+        success: true,
+        message: 'Tenant and all associated data deleted successfully',
+        data: {
+          deletedTenant: {
+            id: tenant.id,
+            name: tenant.name,
+            counts: tenant._count,
+          },
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to delete tenant:', {
+        tenantId: id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw new InternalServerError('Failed to delete tenant and associated data');
+    }
+  })
+);
+
+// Cleanup tenant collections (admin only)
+router.post('/cleanup-collections', 
+  requireTenant,
+  authorize('ADMIN'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      // Get document count before cleanup
+      const documentCount = await chromadb.getDocumentCount(tenantId);
+      
+      // Delete and recreate the collection to clean up orphaned data
+      await chromadb.deleteCollection(tenantId);
+      await chromadb.getTenantCollection(tenantId); // This will recreate it
+      
+      logger.info(`Collection cleanup completed for tenant ${tenantId}`, {
+        documentsRemoved: documentCount,
+      });
+
+      res.json({
+        success: true,
+        message: 'Collection cleanup completed successfully',
+        data: {
+          documentsRemoved: documentCount,
+        },
+      });
+    } catch (error) {
+      logger.error(`Collection cleanup failed for tenant ${tenantId}:`, error);
+      throw new InternalServerError('Failed to cleanup collection');
+    }
   })
 );
 

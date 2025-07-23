@@ -18,6 +18,20 @@ import { database } from './config/database';
 import { connectRedis } from './config/redis';
 import { initializeChroma } from './config/chroma';
 
+// Import production-ready services
+import { monitoringService } from './services/monitoringService';
+import { backupService } from './services/backupService';
+import { cachingService } from './services/cachingService';
+
+// Import enhanced security middleware
+import {
+  enhancedHelmet,
+  apiRateLimit,
+  suspiciousActivityDetector,
+  securityLogger,
+  validateContentType,
+} from './middleware/securityMiddleware';
+
 // Import routes
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -28,8 +42,10 @@ import channelRoutes from './routes/channels';
 import conversationRoutes from './routes/conversations';
 import analyticsRoutes from './routes/analytics';
 import webhookRoutes from './routes/webhooks';
-import apiRoutes from './routes/api';
 import apiKeyRoutes from './routes/apiKeys';
+import searchRoutes from './routes/search';
+import aiProviderRoutes from './routes/aiProviders';
+import systemRoutes from './routes/system';
 
 // Import socket handlers
 import { initializeSocketHandlers } from './sockets/socketHandlers';
@@ -40,7 +56,7 @@ dotenv.config();
 class AIgentableServer {
   private app: express.Application;
   private server: any;
-  private io: Server;
+  public io: Server;
   private port: number;
 
   constructor() {
@@ -62,37 +78,41 @@ class AIgentableServer {
   }
 
   private initializeMiddleware(): void {
-    // Security middleware
-    this.app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "https:"],
-        },
-      },
-    }));
+    // Enhanced security middleware
+    this.app.use(enhancedHelmet);
+    
+    // Security logging
+    this.app.use(securityLogger);
+    
+    // Suspicious activity detection
+    this.app.use(suspiciousActivityDetector);
+    
+    // Content type validation
+    this.app.use(validateContentType(['application/json', 'multipart/form-data', 'application/x-www-form-urlencoded']));
 
     // CORS configuration
     this.app.use(cors({
       origin: config.corsOrigin,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID']
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-API-Key']
     }));
 
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: config.rateLimitWindowMs,
-      max: config.rateLimitMaxRequests,
-      message: {
-        error: 'Too many requests from this IP, please try again later.'
-      },
-      standardHeaders: true,
-      legacyHeaders: false,
+    // Enhanced rate limiting
+    this.app.use('/api', apiRateLimit);
+    
+    // API request metrics collection
+    this.app.use((req, res, next) => {
+      const startTime = Date.now();
+      
+      res.on('finish', () => {
+        const responseTime = Date.now() - startTime;
+        const isError = res.statusCode >= 400;
+        monitoringService.recordApiRequest(req.path, responseTime, isError);
+      });
+      
+      next();
     });
-    this.app.use('/api', limiter);
 
     // Body parsing middleware
     this.app.use(express.json({ limit: '10mb' }));
@@ -138,6 +158,9 @@ class AIgentableServer {
     this.app.use(`${apiPrefix}/conversations`, authenticate, conversationRoutes);
     this.app.use(`${apiPrefix}/analytics`, authenticate, analyticsRoutes);
     this.app.use(`${apiPrefix}/api-keys`, authenticate, apiKeyRoutes);
+    this.app.use(`${apiPrefix}/ai-providers`, authenticate, aiProviderRoutes);
+    this.app.use(`${apiPrefix}/search`, authenticate, searchRoutes);
+    this.app.use(`${apiPrefix}/system`, authenticate, systemRoutes);
 
     // API documentation
     this.app.get('/api/docs', (req, res) => {
@@ -153,7 +176,8 @@ class AIgentableServer {
           channels: `${apiPrefix}/channels`,
           conversations: `${apiPrefix}/conversations`,
           analytics: `${apiPrefix}/analytics`,
-          webhooks: `${apiPrefix}/webhooks`
+          webhooks: `${apiPrefix}/webhooks`,
+          aiProviders: `${apiPrefix}/ai-providers`
         }
       });
     });
@@ -174,20 +198,67 @@ class AIgentableServer {
   private async initializeServices(): Promise<void> {
     try {
       // Connect to database
-  await database.connect();
-  logger.info('Database connected successfully');
+      await database.connect();
+      logger.info('Database connected successfully');
 
-  // Connect to Redis
-  await connectRedis();
-  logger.info('Redis connected successfully');
+      // Connect to Redis
+      await connectRedis();
+      logger.info('Redis connected successfully');
 
       // Initialize ChromaDB
       await initializeChroma();
       logger.info('ChromaDB initialized successfully');
 
+      // Initialize monitoring service
+      monitoringService.startMonitoring(60000); // Monitor every minute
+      logger.info('Monitoring service started');
+
+      // Initialize backup service
+      await backupService.initialize({
+        schedule: '0 2 * * *', // Daily at 2 AM
+        retention: {
+          daily: 7,
+          weekly: 4,
+          monthly: 12,
+        },
+        storage: {
+          local: {
+            enabled: true,
+            path: './backups',
+          },
+        },
+        compression: true,
+        encryption: {
+          enabled: false,
+        },
+      });
+      logger.info('Backup service initialized');
+
+      // Warm up cache with essential data
+      await this.warmUpCache();
+      logger.info('Cache warmed up successfully');
+
     } catch (error) {
       logger.error('Failed to initialize services:', error);
       process.exit(1);
+    }
+  }
+
+  private async warmUpCache(): Promise<void> {
+    try {
+      // Cache frequently accessed data
+      const warmUpData = {
+        'system:status': 'healthy',
+        'system:version': process.env.npm_package_version || '1.0.0',
+        'system:startup_time': new Date().toISOString(),
+      };
+      
+      await cachingService.warmUp(warmUpData, {
+        ttl: 3600, // 1 hour
+        prefix: 'system',
+      });
+    } catch (error) {
+      logger.warn('Cache warm-up failed:', error);
     }
   }
 
@@ -221,16 +292,36 @@ class AIgentableServer {
   private async gracefulShutdown(): Promise<void> {
     logger.info('Received shutdown signal, closing server gracefully...');
     
-    this.server.close(() => {
-      logger.info('HTTP server closed');
-      process.exit(0);
-    });
+    try {
+      // Stop monitoring service
+      monitoringService.stopMonitoring();
+      logger.info('Monitoring service stopped');
+      
+      // Stop scheduled backups
+      backupService.stopScheduledBackups();
+      logger.info('Backup service stopped');
+      
+      // Close database connections
+      await database.disconnect();
+      logger.info('Database disconnected');
+      
+      // Close Redis connections
+      // Redis client will be closed automatically
+      
+      // Close HTTP server
+      this.server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+      });
+    } catch (error) {
+      logger.error('Error during graceful shutdown:', error);
+    }
 
-    // Force close after 10 seconds
+    // Force close after 15 seconds
     setTimeout(() => {
       logger.error('Could not close connections in time, forcefully shutting down');
       process.exit(1);
-    }, 10000);
+    }, 15000);
   }
 }
 
@@ -240,5 +331,13 @@ server.start().catch((error) => {
   logger.error('Failed to start AIgentable server:', error);
   process.exit(1);
 });
+
+// Export function to get Socket.IO instance
+export const getIO = (): Server => {
+  if (!server || !server.io) {
+    throw new Error('Socket.IO not initialized');
+  }
+  return server.io;
+};
 
 export default server;
