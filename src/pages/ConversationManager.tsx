@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   ChatBubbleLeftRightIcon,
   MagnifyingGlassIcon,
@@ -10,105 +10,11 @@ import {
   CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 import { format } from 'date-fns'
+import { useConversations } from '../hooks/useConversations'
+import { ConversationFilters, ConversationStats } from '../types/conversation'
+import { Conversation, Message } from '../hooks/useConversations'
 
-interface Conversation {
-  id: string
-  customerName: string
-  customerAvatar?: string
-  channel: 'whatsapp' | 'website' | 'facebook' | 'telegram'
-  agent: string
-  status: 'active' | 'resolved' | 'escalated' | 'waiting'
-  lastMessage: string
-  lastMessageTime: string
-  messageCount: number
-  isHuman: boolean
-  priority: 'low' | 'medium' | 'high'
-}
 
-interface Message {
-  id: string
-  sender: 'customer' | 'agent' | 'human'
-  content: string
-  timestamp: string
-  type: 'text' | 'image' | 'file'
-}
-
-const mockConversations: Conversation[] = [
-  {
-    id: '1',
-    customerName: 'Sarah Johnson',
-    channel: 'whatsapp',
-    agent: 'Sales Assistant',
-    status: 'active',
-    lastMessage: 'Can you tell me more about your premium plan?',
-    lastMessageTime: '2024-01-15T10:30:00Z',
-    messageCount: 8,
-    isHuman: false,
-    priority: 'medium',
-  },
-  {
-    id: '2',
-    customerName: 'Mike Chen',
-    channel: 'website',
-    agent: 'Support Bot',
-    status: 'escalated',
-    lastMessage: 'I need to speak with a human agent',
-    lastMessageTime: '2024-01-15T10:25:00Z',
-    messageCount: 12,
-    isHuman: true,
-    priority: 'high',
-  },
-  {
-    id: '3',
-    customerName: 'Emma Davis',
-    channel: 'facebook',
-    agent: 'Lead Qualifier',
-    status: 'resolved',
-    lastMessage: 'Thank you for your help!',
-    lastMessageTime: '2024-01-15T09:45:00Z',
-    messageCount: 6,
-    isHuman: false,
-    priority: 'low',
-  },
-]
-
-const mockMessages: Message[] = [
-  {
-    id: '1',
-    sender: 'customer',
-    content: 'Hi, I\'m interested in your AI agent platform',
-    timestamp: '2024-01-15T10:20:00Z',
-    type: 'text',
-  },
-  {
-    id: '2',
-    sender: 'agent',
-    content: 'Hello! I\'d be happy to help you learn about our AI agent platform. What specific features are you most interested in?',
-    timestamp: '2024-01-15T10:20:30Z',
-    type: 'text',
-  },
-  {
-    id: '3',
-    sender: 'customer',
-    content: 'I want to know about pricing and integration options',
-    timestamp: '2024-01-15T10:22:00Z',
-    type: 'text',
-  },
-  {
-    id: '4',
-    sender: 'agent',
-    content: 'Great! We offer flexible pricing plans starting from $29/month. Our platform integrates with WhatsApp, Facebook Messenger, Telegram, and website widgets. Would you like me to show you our pricing details?',
-    timestamp: '2024-01-15T10:22:45Z',
-    type: 'text',
-  },
-  {
-    id: '5',
-    sender: 'customer',
-    content: 'Can you tell me more about your premium plan?',
-    timestamp: '2024-01-15T10:30:00Z',
-    type: 'text',
-  },
-]
 
 const getChannelIcon = (channel: string) => {
   const icons = {
@@ -149,70 +55,112 @@ const getPriorityColor = (priority: string) => {
 }
 
 export default function ConversationManager() {
-  const [conversations, setConversations] = useState<Conversation[]>(mockConversations)
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(conversations[0])
-  const [messages, setMessages] = useState<Message[]>(mockMessages)
+  const {
+    conversations,
+    loading,
+    error,
+    fetchConversations,
+    getConversation,
+    sendMessage,
+    updateConversationStatus,
+    searchConversations
+  } = useConversations()
+  
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  
   const [newMessage, setNewMessage] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [channelFilter, setChannelFilter] = useState('all')
+  
+  useEffect(() => {
+    fetchConversations()
+  }, [])
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation) return
 
-    const message: Message = {
-      id: Date.now().toString(),
-      sender: 'human',
-      content: newMessage,
-      timestamp: new Date().toISOString(),
-      type: 'text',
+    try {
+      await sendMessage(selectedConversation.id, newMessage)
+      setNewMessage('')
+    } catch (error) {
+      console.error('Failed to send message:', error)
     }
-
-    setMessages(prev => [...prev, message])
-    setNewMessage('')
-
-    // Update conversation
-    setConversations(prev => prev.map(conv => 
-      conv.id === selectedConversation.id
-        ? {
-            ...conv,
-            lastMessage: newMessage,
-            lastMessageTime: new Date().toISOString(),
-            messageCount: conv.messageCount + 1,
-            isHuman: true,
-          }
-        : conv
-    ))
   }
 
-  const handleEscalate = (conversationId: string) => {
-    setConversations(prev => prev.map(conv => 
-      conv.id === conversationId
-        ? { ...conv, status: 'escalated' as const, isHuman: true }
-        : conv
-    ))
+  const handleEscalate = async (conversationId: string) => {
+    try {
+      await updateConversationStatus(conversationId, 'PENDING')
+    } catch (error) {
+      console.error('Failed to escalate conversation:', error)
+    }
   }
 
-  const handleResolve = (conversationId: string) => {
-    setConversations(prev => prev.map(conv => 
-      conv.id === conversationId
-        ? { ...conv, status: 'resolved' as const }
-        : conv
-    ))
+  const handleResolve = async (conversationId: string) => {
+    try {
+      await updateConversationStatus(conversationId, 'CLOSED')
+      // Refresh the conversation if it's currently selected
+      if (selectedConversation?.id === conversationId) {
+        const conversationData = await getConversation(conversationId)
+        setSelectedConversation(conversationData.conversation)
+        setMessages(conversationData.messages)
+      }
+    } catch (error) {
+      console.error('Failed to resolve conversation:', error)
+    }
+  }
+  
+  const handleSelectConversation = async (conversation: any) => {
+    try {
+      const conversationData = await getConversation(conversation.id)
+      setSelectedConversation(conversationData.conversation)
+      setMessages(conversationData.messages)
+    } catch (error) {
+      console.error('Failed to load conversation:', error)
+    }
   }
 
-  const filteredConversations = conversations.filter(conv => {
-    const matchesSearch = conv.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         conv.lastMessage.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = statusFilter === 'all' || conv.status === statusFilter
-    const matchesChannel = channelFilter === 'all' || conv.channel === channelFilter
+  const filteredConversations = conversations?.filter(conv => {
+    const matchesSearch = searchTerm === '' || 
+      conv.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      conv.lastMessage?.content?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    const matchesStatus = statusFilter === 'all' || conv.status.toLowerCase() === statusFilter
+    const matchesChannel = channelFilter === 'all' || conv.channelId === channelFilter
     
     return matchesSearch && matchesStatus && matchesChannel
-  })
+  }) || []
 
-  const activeConversations = conversations.filter(c => c.status === 'active').length
-  const escalatedConversations = conversations.filter(c => c.status === 'escalated').length
-  const resolvedToday = conversations.filter(c => c.status === 'resolved').length
+  const activeConversations = conversations?.filter(c => c.status === 'ACTIVE').length || 0
+  const escalatedConversations = conversations?.filter(c => c.status === 'PENDING').length || 0
+  const resolvedConversations = conversations?.filter(c => c.status === 'CLOSED').length || 0
+  
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading conversations...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <div className="text-red-800">
+            <h3 className="text-lg font-medium">Error loading conversations</h3>
+            <p className="mt-2">{error}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -267,7 +215,7 @@ export default function ConversationManager() {
               <div className="ml-5 w-0 flex-1">
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Resolved Today</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">{resolvedToday}</dd>
+                  <dd className="text-2xl font-semibold text-gray-900">{resolvedConversations}</dd>
                 </dl>
               </div>
             </div>
@@ -305,9 +253,8 @@ export default function ConversationManager() {
                 >
                   <option value="all">All Status</option>
                   <option value="active">Active</option>
-                  <option value="escalated">Escalated</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="waiting">Waiting</option>
+                  <option value="pending">Pending</option>
+                  <option value="closed">Closed</option>
                 </select>
                 
                 <select
@@ -328,7 +275,7 @@ export default function ConversationManager() {
               {filteredConversations.map((conversation) => (
                 <div
                   key={conversation.id}
-                  onClick={() => setSelectedConversation(conversation)}
+                  onClick={() => handleSelectConversation(conversation)}
                   className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
                     selectedConversation?.id === conversation.id ? 'bg-blue-50 border-blue-200' : ''
                   }`}
@@ -339,10 +286,12 @@ export default function ConversationManager() {
                         <UserIcon className="h-4 w-4 text-gray-600" />
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{conversation.customerName}</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {conversation.title || 'Unknown Customer'}
+                        </div>
                         <div className="text-xs text-gray-500 flex items-center">
-                          <span className="mr-1">{getChannelIcon(conversation.channel)}</span>
-                          {conversation.channel}
+                          <span className="mr-1">{getChannelIcon('website')}</span>
+                          Channel {conversation.channelId}
                         </div>
                       </div>
                     </div>
@@ -350,27 +299,25 @@ export default function ConversationManager() {
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(conversation.status)}`}>
                         {conversation.status}
                       </span>
-                      <span className={`mt-1 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getPriorityColor(conversation.priority)}`}>
-                        {conversation.priority}
+                      <span className={`mt-1 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getPriorityColor('normal')}`}>
+                        Normal
                       </span>
                     </div>
                   </div>
                   
                   <div className="flex items-center justify-between">
                     <div className="flex items-center text-xs text-gray-500">
-                      {conversation.isHuman ? (
-                        <UserIcon className="h-3 w-3 mr-1" />
-                      ) : (
-                        <CpuChipIcon className="h-3 w-3 mr-1" />
-                      )}
-                      {conversation.agent}
+                      <CpuChipIcon className="h-3 w-3 mr-1" />
+                      {conversation.agentId || 'AI Agent'}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {format(new Date(conversation.lastMessageTime), 'HH:mm')}
+                      {conversation.lastMessage?.timestamp ? format(new Date(conversation.lastMessage.timestamp), 'HH:mm') : ''}
                     </div>
                   </div>
                   
-                  <p className="text-sm text-gray-600 mt-2 truncate">{conversation.lastMessage}</p>
+                  <p className="text-sm text-gray-600 mt-2 truncate">
+                    {conversation.lastMessage?.content || 'No messages yet'}
+                  </p>
                 </div>
               ))}
             </div>
@@ -388,16 +335,18 @@ export default function ConversationManager() {
                         <UserIcon className="h-5 w-5 text-gray-600" />
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{selectedConversation.customerName}</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {selectedConversation.title || 'Unknown Customer'}
+                        </div>
                         <div className="text-xs text-gray-500 flex items-center">
-                          <span className="mr-1">{getChannelIcon(selectedConversation.channel)}</span>
-                          {selectedConversation.channel} • {selectedConversation.messageCount} messages
+                          <span className="mr-1">{getChannelIcon('website')}</span>
+                          Channel {selectedConversation.channelId} • {selectedConversation.messageCount} messages
                         </div>
                       </div>
                     </div>
                     
                     <div className="flex space-x-2">
-                      {selectedConversation.status !== 'escalated' && (
+                      {selectedConversation.status !== 'PENDING' && (
                         <button
                           onClick={() => handleEscalate(selectedConversation.id)}
                           className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
@@ -406,7 +355,7 @@ export default function ConversationManager() {
                           Escalate
                         </button>
                       )}
-                      {selectedConversation.status !== 'resolved' && (
+                      {selectedConversation.status !== 'CLOSED' && (
                         <button
                           onClick={() => handleResolve(selectedConversation.id)}
                           className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
@@ -425,16 +374,14 @@ export default function ConversationManager() {
                     <div
                       key={message.id}
                       className={`flex ${
-                        message.sender === 'customer' ? 'justify-start' : 'justify-end'
+                        message.role === 'user' ? 'justify-start' : 'justify-end'
                       }`}
                     >
                       <div
                         className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                          message.sender === 'customer'
+                          message.role === 'user'
                             ? 'bg-gray-100 text-gray-900'
-                            : message.sender === 'agent'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-green-500 text-white'
+                            : 'bg-blue-500 text-white'
                         }`}
                       >
                         <p className="text-sm">{message.content}</p>
@@ -442,9 +389,9 @@ export default function ConversationManager() {
                           <span className="text-xs opacity-75">
                             {format(new Date(message.timestamp), 'HH:mm')}
                           </span>
-                          {message.sender !== 'customer' && (
+                          {message.role !== 'user' && (
                             <span className="text-xs opacity-75 ml-2">
-                              {message.sender === 'agent' ? '🤖' : '👤'}
+                              🤖
                             </span>
                           )}
                         </div>

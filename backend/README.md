@@ -194,10 +194,27 @@ class AIService {
 
 ### Socket.io Events
 ```typescript
-// Client to Server
+// Client to Server Events
 'join_conversation'     // Join conversation room
+'leave_conversation'    // Leave conversation room
 'send_message'         // Send new message
 'typing_start'         // Start typing indicator
+'typing_stop'          // Stop typing indicator
+'join_test_session'    // Join agent testing session
+'leave_test_session'   // Leave agent testing session
+
+// Server to Client Events
+'new_message'          // New message received
+'agent_response'       // AI agent response
+'user_typing_start'    // User started typing
+'user_typing_stop'     // User stopped typing
+'agent_typing_start'   // Agent started typing
+'agent_typing_stop'    // Agent stopped typing
+'conversation_update'  // Conversation status change
+'user_joined_conversation' // User joined conversation
+'user_left_conversation'   // User left conversation
+'conversation_closed'  // Conversation closed
+'test_session_error'   // Test session error
 'typing_stop'          // Stop typing indicator
 
 // Server to Client

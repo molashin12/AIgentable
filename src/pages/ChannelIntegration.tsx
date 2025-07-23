@@ -1,97 +1,20 @@
-import { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   ChatBubbleLeftRightIcon,
   GlobeAltIcon,
   DevicePhoneMobileIcon,
   CheckCircleIcon,
-  ExclamationCircleIcon,
+  XCircleIcon,
   ClockIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
-  EyeIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { toast } from 'sonner'
+import { useChannels, Channel } from '../hooks/useChannels'
+import { ChannelStats, WidgetConfig } from '../types/channel'
 
-interface Channel {
-  id: string
-  name: string
-  type: 'WHATSAPP' | 'FACEBOOK' | 'INSTAGRAM' | 'TELEGRAM' | 'WEBSITE'
-  status: 'ACTIVE' | 'INACTIVE' | 'ERROR' | 'CONFIGURING'
-  icon: string
-  description: string
-  conversations: number
-  lastActivity: string
-  config: {
-    apiKey?: string
-    webhookUrl?: string
-    phoneNumber?: string
-    pageId?: string
-    botToken?: string
-  }
-}
 
-const mockChannels: Channel[] = [
-  {
-    id: '1',
-    name: 'WhatsApp Business',
-    type: 'WHATSAPP',
-    status: 'ACTIVE',
-    icon: '📱',
-    description: 'Connect with customers via WhatsApp Business API',
-    conversations: 156,
-    lastActivity: '2 minutes ago',
-    config: {
-      phoneNumber: '+1234567890',
-      apiKey: 'wa_***************',
-    },
-  },
-  {
-    id: '2',
-    name: 'Website Widget',
-    type: 'WEBSITE',
-    status: 'ACTIVE',
-    icon: '🌐',
-    description: 'Embed chat widget on your website',
-    conversations: 89,
-    lastActivity: '5 minutes ago',
-    config: {
-      webhookUrl: 'https://api.aigentable.com/webhook/widget',
-    },
-  },
-  {
-    id: '3',
-    name: 'Facebook Messenger',
-    type: 'FACEBOOK',
-    status: 'INACTIVE',
-    icon: '💬',
-    description: 'Integrate with Facebook Messenger',
-    conversations: 0,
-    lastActivity: 'Never',
-    config: {},
-  },
-  {
-    id: '4',
-    name: 'Instagram Direct',
-    type: 'INSTAGRAM',
-    status: 'CONFIGURING',
-    icon: '📷',
-    description: 'Handle Instagram direct messages',
-    conversations: 0,
-    lastActivity: 'Never',
-    config: {},
-  },
-  {
-    id: '5',
-    name: 'Telegram Bot',
-    type: 'TELEGRAM',
-    status: 'INACTIVE',
-    icon: '✈️',
-    description: 'Create a Telegram bot for customer support',
-    conversations: 0,
-    lastActivity: 'Never',
-    config: {},
-  },
-]
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -100,11 +23,11 @@ const getStatusIcon = (status: string) => {
     case 'CONFIGURING':
       return <ClockIcon className="h-5 w-5 text-yellow-500" />
     case 'INACTIVE':
-      return <ExclamationCircleIcon className="h-5 w-5 text-red-500" />
+      return <XCircleIcon className="h-5 w-5 text-red-500" />
     case 'ERROR':
-      return <ExclamationCircleIcon className="h-5 w-5 text-red-600" />
+      return <XCircleIcon className="h-5 w-5 text-red-600" />
     default:
-      return <ExclamationCircleIcon className="h-5 w-5 text-gray-500" />
+      return <XCircleIcon className="h-5 w-5 text-gray-500" />
   }
 }
 
@@ -123,37 +46,85 @@ const getStatusColor = (status: string) => {
   }
 }
 
+const getChannelIcon = (type: string) => {
+  switch (type) {
+    case 'WHATSAPP':
+      return '💬'
+    case 'TELEGRAM':
+      return '✈️'
+    case 'SLACK':
+      return '💼'
+    case 'DISCORD':
+      return '🎮'
+    case 'EMAIL':
+      return '📧'
+    case 'SMS':
+      return '📱'
+    case 'WEB_CHAT':
+      return '🌐'
+    default:
+      return '💬'
+  }
+}
+
+const getChannelDescription = (type: string) => {
+  switch (type) {
+    case 'WHATSAPP':
+      return 'WhatsApp Business integration'
+    case 'TELEGRAM':
+      return 'Telegram bot integration'
+    case 'SLACK':
+      return 'Slack workspace integration'
+    case 'DISCORD':
+      return 'Discord server integration'
+    case 'EMAIL':
+      return 'Email support integration'
+    case 'SMS':
+      return 'SMS messaging integration'
+    case 'WEB_CHAT':
+      return 'Website chat widget'
+    default:
+      return 'Channel integration'
+  }
+}
+
 export default function ChannelIntegration() {
-  const [channels, setChannels] = useState<Channel[]>(mockChannels)
+  const { channels, loading, error, fetchChannels, updateChannel } = useChannels()
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null)
   const [showWidgetCode, setShowWidgetCode] = useState(false)
-  const [widgetConfig, setWidgetConfig] = useState({
+  const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>({
     theme: 'light',
     position: 'bottom-right',
     primaryColor: '#3B82F6',
-    greeting: 'Hello! How can I help you today?',
-    placeholder: 'Type your message...',
+    greetingMessage: 'Hello! How can I help you today?'
   })
 
-  const connectChannel = (channelId: string) => {
-    setChannels(prev => prev.map(channel => 
-      channel.id === channelId 
-        ? { ...channel, status: 'ACTIVE' as const }
-        : channel
-    ))
-    toast.success('Channel connected successfully!')
+  useEffect(() => {
+    fetchChannels()
+  }, [fetchChannels])
+
+  const connectChannel = async (channelId: string) => {
+    try {
+      await updateChannel(channelId, { status: 'ACTIVE' })
+      toast.success('Channel connected successfully!')
+    } catch (error) {
+      toast.error('Failed to connect channel')
+    }
   }
 
-  const disconnectChannel = (channelId: string) => {
-    setChannels(prev => prev.map(channel => 
-      channel.id === channelId 
-        ? { ...channel, status: 'INACTIVE' as const }
-        : channel
-    ))
-    toast.success('Channel disconnected')
+  const disconnectChannel = async (channelId: string) => {
+    try {
+      await updateChannel(channelId, { status: 'INACTIVE' })
+      toast.success('Channel disconnected')
+    } catch (error) {
+      toast.error('Failed to disconnect channel')
+    }
   }
 
   const generateWidgetCode = () => {
+    const positionStyles = widgetConfig.position.includes('bottom') ? 'bottom: 20px;' : 'top: 20px;';
+    const horizontalStyles = widgetConfig.position.includes('right') ? 'right: 20px;' : 'left: 20px;';
+    
     return `<!-- AIgentable Chat Widget -->
 <script>
   (function() {
@@ -161,8 +132,8 @@ export default function ChannelIntegration() {
     widget.id = 'aigentable-widget';
     widget.style.cssText = '
       position: fixed;
-      ${widgetConfig.position.includes('bottom') ? 'bottom: 20px;' : 'top: 20px;'}
-      ${widgetConfig.position.includes('right') ? 'right: 20px;' : 'left: 20px;'}
+      ${positionStyles}
+      ${horizontalStyles}
       width: 350px;
       height: 500px;
       border: none;
@@ -172,17 +143,37 @@ export default function ChannelIntegration() {
     ';
     
     var iframe = document.createElement('iframe');
-    iframe.src = 'https://widget.aigentable.com/chat?theme=${widgetConfig.theme}&color=${encodeURIComponent(widgetConfig.primaryColor)}&greeting=${encodeURIComponent(widgetConfig.greeting)}';
+    iframe.src = 'https://widget.aigentable.com/chat?theme=${widgetConfig.theme}&color=${encodeURIComponent(widgetConfig.primaryColor)}&greeting=${encodeURIComponent(widgetConfig.greetingMessage)}';
     iframe.style.cssText = 'width: 100%; height: 100%; border: none; border-radius: 12px;';
     
     widget.appendChild(iframe);
     document.body.appendChild(widget);
   })();
-</script>`
+</script>`;
   }
 
-  const connectedChannels = channels.filter(c => c.status === 'ACTIVE').length
-  const totalConversations = channels.reduce((sum, c) => sum + c.conversations, 0)
+  const connectedChannels = channels?.filter(c => c.status === 'ACTIVE').length || 0
+  const totalConversations = channels?.reduce((sum, c) => sum + c.statistics.totalConversations, 0) || 0
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-center items-center h-64">
+          <div className="text-lg text-gray-500">Loading channels...</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-center items-center h-64">
+          <div className="text-lg text-red-500">Error loading channels: {error}</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -259,7 +250,7 @@ export default function ChannelIntegration() {
                 <label className="block text-sm font-medium text-gray-700">Theme</label>
                 <select
                   value={widgetConfig.theme}
-                  onChange={(e) => setWidgetConfig({...widgetConfig, theme: e.target.value})}
+                  onChange={(e) => setWidgetConfig({...widgetConfig, theme: e.target.value as 'light' | 'dark'})}
                   className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                 >
                   <option value="light">Light</option>
@@ -295,8 +286,8 @@ export default function ChannelIntegration() {
                 <label className="block text-sm font-medium text-gray-700">Greeting Message</label>
                 <input
                   type="text"
-                  value={widgetConfig.greeting}
-                  onChange={(e) => setWidgetConfig({...widgetConfig, greeting: e.target.value})}
+                  value={widgetConfig.greetingMessage}
+                  onChange={(e) => setWidgetConfig({...widgetConfig, greetingMessage: e.target.value})}
                   className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                   placeholder="Hello! How can I help you today?"
                 />
@@ -324,12 +315,12 @@ export default function ChannelIntegration() {
                   </div>
                 </div>
                 <div className="bg-gray-100 rounded-lg p-3 mb-3">
-                  <p className="text-sm text-gray-700">{widgetConfig.greeting}</p>
+                  <p className="text-sm text-gray-700">{widgetConfig.greetingMessage}</p>
                 </div>
                 <div className="flex">
                   <input
                     type="text"
-                    placeholder={widgetConfig.placeholder}
+                    placeholder="Type your message here..."
                     className="flex-1 text-sm border border-gray-300 rounded-l-md px-3 py-2"
                     disabled
                   />
@@ -352,14 +343,14 @@ export default function ChannelIntegration() {
           <h3 className="text-lg font-medium text-gray-900 mb-4">Available Channels</h3>
           
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {channels.map((channel) => (
+            {channels?.map((channel) => (
               <div key={channel.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center">
-                    <span className="text-2xl mr-3">{channel.icon}</span>
+                    <span className="text-2xl mr-3">{getChannelIcon(channel.type)}</span>
                     <div>
                       <h4 className="text-sm font-medium text-gray-900">{channel.name}</h4>
-                      <p className="text-xs text-gray-500">{channel.description}</p>
+                      <p className="text-xs text-gray-500">{getChannelDescription(channel.type)}</p>
                     </div>
                   </div>
                   {getStatusIcon(channel.status)}
@@ -373,10 +364,10 @@ export default function ChannelIntegration() {
                 
                 <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 mb-4">
                   <div>
-                    <span className="font-medium">Conversations:</span> {channel.conversations}
+                    <span className="font-medium">Conversations:</span> {channel.statistics.totalConversations}
                   </div>
                   <div>
-                    <span className="font-medium">Last Activity:</span> {channel.lastActivity}
+                    <span className="font-medium">Last Activity:</span> {new Date(channel.updatedAt).toLocaleDateString()}
                   </div>
                 </div>
                 
@@ -483,7 +474,7 @@ export default function ChannelIntegration() {
                   </>
                 )}
                 
-                {selectedChannel.type === 'FACEBOOK' && (
+                {selectedChannel.type === 'SLACK' && (
                   <>
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Page ID</label>

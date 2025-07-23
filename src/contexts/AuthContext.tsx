@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { authApi } from '../lib/api'
+import { apiClient } from '../lib/api'
 import { toast } from 'sonner'
 
 interface User {
@@ -47,7 +47,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const token = localStorage.getItem('authToken')
+        const token = localStorage.getItem('token')
         const userData = localStorage.getItem('user')
         
         if (token && userData) {
@@ -59,15 +59,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             await refreshToken()
           } catch (error) {
             // Token is invalid, clear auth state
-            localStorage.removeItem('authToken')
-            localStorage.removeItem('user')
+            apiClient.clearAuth()
             setUser(null)
           }
         }
       } catch (error) {
         console.error('Error initializing auth:', error)
-        localStorage.removeItem('authToken')
-        localStorage.removeItem('user')
+        apiClient.clearAuth()
         setUser(null)
       } finally {
         setIsLoading(false)
@@ -80,19 +78,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setIsLoading(true)
-      const response = await authApi.login(email, password)
+      const response = await apiClient.login(email, password)
       
-      if (response.success && response.data) {
-        const { tokens, user: userData } = response.data
-        
-        localStorage.setItem('authToken', tokens.accessToken)
-        localStorage.setItem('user', JSON.stringify(userData))
-        setUser(userData)
+      if (response.user && response.token) {
+        localStorage.setItem('user', JSON.stringify(response.user))
+        setUser(response.user)
         
         toast.success('Login successful!')
         return true
       } else {
-        toast.error(response.message || 'Login failed')
+        toast.error('Login failed')
         return false
       }
     } catch (error: any) {
@@ -107,19 +102,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const register = async (userData: { email: string; password: string; name: string; tenantName: string }): Promise<boolean> => {
     try {
       setIsLoading(true)
-      const response = await authApi.register(userData)
+      const response = await apiClient.register(userData)
       
-      if (response.success && response.data) {
-        const { tokens, user: newUser } = response.data
-        
-        localStorage.setItem('authToken', tokens.accessToken)
-        localStorage.setItem('user', JSON.stringify(newUser))
-        setUser(newUser)
+      if (response.user && response.token) {
+        localStorage.setItem('user', JSON.stringify(response.user))
+        setUser(response.user)
         
         toast.success('Registration successful!')
         return true
       } else {
-        toast.error(response.message || 'Registration failed')
+        toast.error('Registration failed')
         return false
       }
     } catch (error: any) {
@@ -133,12 +125,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      await authApi.logout()
+      await apiClient.logout()
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
-      localStorage.removeItem('authToken')
-      localStorage.removeItem('user')
       setUser(null)
       toast.success('Logged out successfully')
     }
@@ -146,23 +136,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const refreshToken = async (): Promise<boolean> => {
     try {
-      const response = await authApi.refreshToken()
+      const response = await apiClient.getProfile()
       
-      if (response.success && response.data) {
-        const { tokens, user: userData } = response.data
-        
-        localStorage.setItem('authToken', tokens.accessToken)
-        localStorage.setItem('user', JSON.stringify(userData))
-        setUser(userData)
-        
+      if (response.user) {
+        localStorage.setItem('user', JSON.stringify(response.user))
+        setUser(response.user)
         return true
       } else {
-        throw new Error('Token refresh failed')
+        throw new Error('Profile fetch failed')
       }
     } catch (error) {
-      console.error('Token refresh error:', error)
-      localStorage.removeItem('authToken')
-      localStorage.removeItem('user')
+      console.error('Profile fetch error:', error)
+      apiClient.clearAuth()
       setUser(null)
       return false
     }

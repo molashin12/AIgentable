@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   ChartBarIcon,
   ClockIcon,
@@ -26,6 +26,8 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { format, subDays } from 'date-fns'
+import { useAnalytics } from '../hooks/useAnalytics'
+import { useAgents } from '../hooks/useAgents'
 
 interface MetricCard {
   title: string
@@ -35,83 +37,31 @@ interface MetricCard {
   icon: React.ComponentType<any>
 }
 
-const conversationData = [
-  { date: '2024-01-08', conversations: 45, resolved: 38, escalated: 7 },
-  { date: '2024-01-09', conversations: 52, resolved: 44, escalated: 8 },
-  { date: '2024-01-10', conversations: 48, resolved: 41, escalated: 7 },
-  { date: '2024-01-11', conversations: 61, resolved: 53, escalated: 8 },
-  { date: '2024-01-12', conversations: 58, resolved: 49, escalated: 9 },
-  { date: '2024-01-13', conversations: 67, resolved: 58, escalated: 9 },
-  { date: '2024-01-14', conversations: 72, resolved: 63, escalated: 9 },
-]
 
-const responseTimeData = [
-  { hour: '00:00', avgTime: 2.3 },
-  { hour: '04:00', avgTime: 1.8 },
-  { hour: '08:00', avgTime: 3.2 },
-  { hour: '12:00', avgTime: 4.1 },
-  { hour: '16:00', avgTime: 3.8 },
-  { hour: '20:00', avgTime: 2.9 },
-]
-
-const channelData = [
-  { name: 'WhatsApp', value: 35, color: '#25D366' },
-  { name: 'Website', value: 28, color: '#3B82F6' },
-  { name: 'Facebook', value: 22, color: '#1877F2' },
-  { name: 'Telegram', value: 15, color: '#0088CC' },
-]
-
-const agentPerformanceData = [
-  { name: 'Sales Assistant', conversations: 156, satisfaction: 4.8, responseTime: 2.1 },
-  { name: 'Support Bot', conversations: 134, satisfaction: 4.6, responseTime: 1.8 },
-  { name: 'Lead Qualifier', conversations: 98, satisfaction: 4.7, responseTime: 2.3 },
-  { name: 'FAQ Helper', conversations: 87, satisfaction: 4.5, responseTime: 1.5 },
-]
-
-const satisfactionTrendData = [
-  { date: '2024-01-08', satisfaction: 4.2 },
-  { date: '2024-01-09', satisfaction: 4.3 },
-  { date: '2024-01-10', satisfaction: 4.1 },
-  { date: '2024-01-11', satisfaction: 4.4 },
-  { date: '2024-01-12', satisfaction: 4.6 },
-  { date: '2024-01-13', satisfaction: 4.7 },
-  { date: '2024-01-14', satisfaction: 4.8 },
-]
-
-const metricCards: MetricCard[] = [
-  {
-    title: 'Total Conversations',
-    value: '2,847',
-    change: '+12.5%',
-    changeType: 'increase',
-    icon: ChatBubbleLeftRightIcon,
-  },
-  {
-    title: 'Avg Response Time',
-    value: '2.3s',
-    change: '-8.2%',
-    changeType: 'decrease',
-    icon: undefined
-  },
-  {
-    title: 'Customer Satisfaction',
-    value: '4.7/5',
-    change: '+5.1%',
-    changeType: 'increase',
-    icon: UserGroupIcon,
-  },
-  {
-    title: 'Resolution Rate',
-    value: '87.3%',
-    change: '+3.4%',
-    changeType: 'increase',
-    icon: ChartBarIcon,
-  },
-]
 
 export default function Analytics() {
   const [dateRange, setDateRange] = useState('7d')
   const [selectedMetric, setSelectedMetric] = useState('conversations')
+  
+  const {
+    dashboardMetrics,
+    conversationMetrics,
+    agentMetrics,
+    loading,
+    error,
+    fetchDashboardMetrics,
+    fetchConversationMetrics,
+    fetchAgentMetrics,
+    exportToCsv
+  } = useAnalytics()
+  
+  const { agents } = useAgents()
+  
+  useEffect(() => {
+    fetchDashboardMetrics()
+    fetchConversationMetrics()
+    // fetchAgentMetrics() - removed as it requires agentId parameter
+  }, [dateRange])
 
   const formatDate = (dateStr: string) => {
     return format(new Date(dateStr), 'MMM dd')
@@ -119,6 +69,63 @@ export default function Analytics() {
 
   const formatHour = (hourStr: string) => {
     return hourStr
+  }
+  
+  const metricCards: MetricCard[] = [
+    {
+      title: 'Total Conversations',
+      value: dashboardMetrics?.totalConversations?.toLocaleString() || '0',
+      change: dashboardMetrics?.conversationGrowth ? `${dashboardMetrics.conversationGrowth > 0 ? '+' : ''}${dashboardMetrics.conversationGrowth.toFixed(1)}%` : '0%',
+      changeType: (dashboardMetrics?.conversationGrowth || 0) >= 0 ? 'increase' : 'decrease',
+      icon: ChatBubbleLeftRightIcon,
+    },
+    {
+      title: 'Avg Response Time',
+      value: dashboardMetrics?.avgResponseTime ? `${dashboardMetrics.avgResponseTime.toFixed(1)}s` : '0s',
+      change: dashboardMetrics?.responseTimeChange ? `${dashboardMetrics.responseTimeChange > 0 ? '+' : ''}${dashboardMetrics.responseTimeChange.toFixed(1)}%` : '0%',
+      changeType: (dashboardMetrics?.responseTimeChange || 0) <= 0 ? 'increase' : 'decrease',
+      icon: ClockIcon,
+    },
+    {
+      title: 'Customer Satisfaction',
+      value: dashboardMetrics?.avgSatisfaction ? `${dashboardMetrics.avgSatisfaction.toFixed(1)}/5` : '0/5',
+      change: dashboardMetrics?.satisfactionChange ? `${dashboardMetrics.satisfactionChange > 0 ? '+' : ''}${dashboardMetrics.satisfactionChange.toFixed(1)}%` : '0%',
+      changeType: (dashboardMetrics?.satisfactionChange || 0) >= 0 ? 'increase' : 'decrease',
+      icon: UserGroupIcon,
+    },
+    {
+      title: 'Resolution Rate',
+      value: dashboardMetrics?.resolutionRate ? `${dashboardMetrics.resolutionRate.toFixed(1)}%` : '0%',
+      change: dashboardMetrics?.resolutionRateChange ? `${dashboardMetrics.resolutionRateChange > 0 ? '+' : ''}${dashboardMetrics.resolutionRateChange.toFixed(1)}%` : '0%',
+      changeType: (dashboardMetrics?.resolutionRateChange || 0) >= 0 ? 'increase' : 'decrease',
+      icon: ChartBarIcon,
+    },
+  ]
+  
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading analytics...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <div className="text-red-800">
+            <h3 className="text-lg font-medium">Error loading analytics</h3>
+            <p className="mt-2">{error}</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -206,7 +213,7 @@ export default function Analytics() {
             </select>
           </div>
           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={conversationData}>
+            <AreaChart data={conversationMetrics?.trends || []}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis 
                 dataKey="date" 
@@ -233,7 +240,7 @@ export default function Analytics() {
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Average Response Time by Hour</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={responseTimeData}>
+            <LineChart data={conversationMetrics?.responseTimeByHour || []}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis 
                 dataKey="hour" 
@@ -264,7 +271,7 @@ export default function Analytics() {
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
-                data={channelData}
+                data={conversationMetrics?.channelDistribution || []}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
@@ -273,8 +280,8 @@ export default function Analytics() {
                 fill="#8884d8"
                 dataKey="value"
               >
-                {channelData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+                {(conversationMetrics?.channelDistribution || []).map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color || '#3B82F6'} />
                 ))}
               </Pie>
               <Tooltip />
@@ -286,7 +293,7 @@ export default function Analytics() {
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Customer Satisfaction Trend</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={satisfactionTrendData}>
+            <LineChart data={conversationMetrics?.satisfactionTrend || []}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis 
                 dataKey="date" 
@@ -304,7 +311,7 @@ export default function Analytics() {
               />
               <Line
                 type="monotone"
-                dataKey="satisfaction"
+                dataKey="score"
                 stroke="#F59E0B"
                 strokeWidth={3}
                 dot={{ fill: '#F59E0B', strokeWidth: 2, r: 4 }}
@@ -344,10 +351,10 @@ export default function Analytics() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {agentPerformanceData.map((agent, index) => {
-                const performanceScore = ((agent.satisfaction / 5) * 0.4 + 
+              {(agentMetrics?.performance || []).map((agent, index) => {
+                const performanceScore = ((agent.satisfactionScore / 5) * 0.4 + 
                                         (agent.conversations / 200) * 0.3 + 
-                                        (3 / agent.responseTime) * 0.3) * 100
+                                        (3 / agent.avgResponseTime) * 0.3) * 100
                 
                 return (
                   <tr key={index} className="hover:bg-gray-50">
@@ -366,13 +373,13 @@ export default function Analytics() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <span className="text-sm text-gray-900 mr-2">{agent.satisfaction}/5</span>
+                        <span className="text-sm text-gray-900 mr-2">{agent.satisfactionScore}/5</span>
                         <div className="flex">
                           {[...Array(5)].map((_, i) => (
                             <span
                               key={i}
                               className={`text-sm ${
-                                i < Math.floor(agent.satisfaction) ? 'text-yellow-400' : 'text-gray-300'
+                                i < Math.floor(agent.satisfactionScore) ? 'text-yellow-400' : 'text-gray-300'
                               }`}
                             >
                               ★
@@ -382,7 +389,7 @@ export default function Analytics() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {agent.responseTime}s
+                      {agent.avgResponseTime}s
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
@@ -415,7 +422,10 @@ export default function Analytics() {
             </p>
           </div>
           <div className="flex space-x-3">
-            <button className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+            <button 
+              onClick={() => exportToCsv('conversations')}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
               Export CSV
             </button>
             <button className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">

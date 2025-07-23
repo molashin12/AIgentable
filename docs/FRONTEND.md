@@ -27,7 +27,7 @@ The AIgentable frontend is a modern React application built with TypeScript, des
 
 ### Key Features
 - **Responsive Design**: Mobile-first approach with desktop optimization
-- **Real-time Updates**: WebSocket integration for live data
+- **Real-time Updates**: Complete Socket.io integration with live messaging, typing indicators, and notifications
 - **Progressive Enhancement**: Works without JavaScript for core features
 - **Offline Support**: Service worker for offline functionality
 - **Internationalization**: Multi-language support ready
@@ -52,13 +52,17 @@ src/
 │   └── settings/       # Settings pages
 ├── contexts/            # React contexts
 │   ├── AuthContext.tsx # Authentication context
-│   ├── ThemeContext.tsx # Theme management
-│   └── SocketContext.tsx # WebSocket context
+│   ├── LanguageContext.tsx # Multi-language support
+│   └── SocketContext.tsx # Socket.io real-time context
 ├── hooks/               # Custom React hooks
-│   ├── useApi.ts       # API interaction hooks
-│   ├── useAuth.ts      # Authentication hooks
-│   ├── useSocket.ts    # WebSocket hooks
-│   └── useLocalStorage.ts # Local storage hooks
+│   ├── useAgents.ts    # Agent management hooks
+│   ├── useAnalytics.ts # Analytics data hooks
+│   ├── useChannels.ts  # Channel integration hooks
+│   ├── useConversations.ts # Conversation management
+│   ├── useDocuments.ts # Document handling hooks
+│   ├── useRealTimeMessages.ts # Real-time messaging
+│   ├── useTypingIndicator.ts # Typing indicators
+│   └── useTheme.ts     # Theme management hooks
 ├── lib/                 # Utility libraries
 │   ├── api.ts          # API client configuration
 │   ├── utils.ts        # General utilities
@@ -168,6 +172,54 @@ font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   <p className="text-gray-600">Card content goes here...</p>
 </div>
 ```
+
+## 🔄 Real-time Components
+
+### Socket.io Integration
+The application includes comprehensive real-time functionality through Socket.io integration:
+
+#### Core Real-time Components
+- **RealTimeChat**: Complete chat interface with real-time messaging
+- **LiveConversationMonitor**: Live dashboard for monitoring active conversations
+- **AgentTestingInterface**: Real-time agent testing environment
+- **FileUpload**: File upload with real-time progress tracking
+
+#### Real-time Hooks
+```typescript
+// useRealTimeMessages - Real-time messaging hook
+const {
+  messages,
+  isConnected,
+  isAgentTyping,
+  sendMessage,
+  addMessage,
+  updateMessage,
+  clearMessages
+} = useRealTimeMessages(conversationId)
+
+// useTypingIndicator - Typing indicator management
+const {
+  typingUsers,
+  typingText,
+  startTyping,
+  stopTyping
+} = useTypingIndicator(conversationId)
+```
+
+#### Socket Events Handled
+- Message sending and receiving
+- Typing indicators (start/stop)
+- Agent responses and status
+- Conversation updates
+- User presence (join/leave)
+- Connection status management
+
+#### Features
+- **Auto-reconnection**: Automatic reconnection on connection loss
+- **Message queuing**: Messages queued during disconnection
+- **Typing indicators**: Real-time typing status for users and agents
+- **Live notifications**: Toast notifications for real-time events
+- **Connection resilience**: Graceful handling of network issues
 
 ## 🔧 State Management
 

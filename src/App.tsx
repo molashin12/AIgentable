@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Toaster } from 'sonner'
 import { LanguageProvider } from './contexts/LanguageContext'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { SocketProvider } from './contexts/SocketContext'
 import Layout from './components/Layout'
 import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
@@ -86,9 +87,11 @@ function App() {
   return (
     <LanguageProvider>
       <AuthProvider>
-        <Router>
-          <AppRoutes />
-        </Router>
+        <SocketProvider>
+          <Router>
+            <AppRoutes />
+          </Router>
+        </SocketProvider>
       </AuthProvider>
     </LanguageProvider>
   )
