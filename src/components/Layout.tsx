@@ -20,13 +20,13 @@ import { useTheme } from '../hooks/useTheme'
 import { useLanguage, supportedLanguages } from '../contexts/LanguageContext'
 
 const getNavigation = (t: (key: string) => string) => [
-  { name: t('nav.dashboard'), href: '/dashboard', icon: HomeIcon },
-  { name: t('nav.agentBuilder'), href: '/agents', icon: CpuChipIcon },
-  { name: t('nav.trainingCenter'), href: '/training', icon: AcademicCapIcon },
-  { name: t('nav.channels'), href: '/channels', icon: ChatBubbleLeftRightIcon },
-  { name: t('nav.conversations'), href: '/conversations', icon: UserGroupIcon },
-  { name: t('nav.analytics'), href: '/analytics', icon: ChartBarIcon },
-  { name: t('nav.settings'), href: '/settings', icon: Cog6ToothIcon },
+  { name: t('nav.dashboard'), href: '/app/dashboard', icon: HomeIcon },
+  { name: t('nav.agentBuilder'), href: '/app/agents', icon: CpuChipIcon },
+  { name: t('nav.trainingCenter'), href: '/app/training', icon: AcademicCapIcon },
+  { name: t('nav.channels'), href: '/app/channels', icon: ChatBubbleLeftRightIcon },
+  { name: t('nav.conversations'), href: '/app/conversations', icon: UserGroupIcon },
+  { name: t('nav.analytics'), href: '/app/analytics', icon: ChartBarIcon },
+  { name: t('nav.settings'), href: '/app/settings', icon: Cog6ToothIcon },
 ]
 
 function Layout() {
@@ -55,7 +55,7 @@ function Layout() {
             <nav className="flex-1 px-2 space-y-1">
               {navigation.map((item) => {
                 const isActive = location.pathname === item.href || 
-                  (item.href === '/dashboard' && location.pathname === '/')
+                  (item.href === '/app/dashboard' && location.pathname === '/app')
                 return (
                   <Link
                     key={item.name}

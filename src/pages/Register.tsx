@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import {
   EyeIcon,
   EyeSlashIcon,
@@ -13,6 +14,7 @@ import { toast } from 'sonner'
 
 export default function Register() {
   const navigate = useNavigate()
+  const { register, isLoading } = useAuth()
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState({
     // Step 1 - Basic Info
@@ -35,7 +37,6 @@ export default function Register() {
   })
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -95,18 +96,17 @@ export default function Register() {
     
     if (!validateStep3()) return
 
-    setIsLoading(true)
+    const userData = {
+      email: formData.email,
+      password: formData.password,
+      name: `${formData.firstName} ${formData.lastName}`,
+      tenantName: formData.companyName
+    }
+
+    const success = await register(userData)
     
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      toast.success('Account created successfully! Welcome to AIgentable!')
-      navigate('/dashboard')
-    } catch (error) {
-      toast.error('Failed to create account. Please try again.')
-    } finally {
-      setIsLoading(false)
+    if (success) {
+      navigate('/app/dashboard')
     }
   }
 

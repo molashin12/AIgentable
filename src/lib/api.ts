@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { toast } from 'sonner'
 
 // API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1'
 const API_TIMEOUT = 10000
 
 // Create axios instance
@@ -128,6 +128,23 @@ export const authApi = {
   resetPassword: async (token: string, password: string) => {
     return api.post('/auth/reset-password', { token, password })
   },
+
+  // Additional auth endpoints from backend
+  getProfile: async () => {
+    return api.get('/auth/me')
+  },
+
+  updateProfile: async (profileData: any) => {
+    return api.put('/auth/me', profileData)
+  },
+
+  verifyToken: async () => {
+    return api.get('/auth/verify')
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    return api.post('/auth/change-password', { currentPassword, newPassword })
+  },
 }
 
 // Agents API
@@ -183,12 +200,29 @@ export const channelsApi = {
     return api.delete(`/channels/${id}`)
   },
 
-  connect: async (id: string, config: any) => {
-    return api.post(`/channels/${id}/connect`, config)
+  // Updated to use existing backend endpoint
+  test: async (id: string, config?: any) => {
+    return api.post(`/channels/${id}/test`, config)
   },
 
-  disconnect: async (id: string) => {
-    return api.post(`/channels/${id}/disconnect`)
+  // Get webhook configuration
+  getWebhookConfig: async (id: string) => {
+    return api.get(`/channels/${id}/webhook`)
+  },
+
+  // Regenerate webhook secret
+  regenerateWebhookSecret: async (id: string) => {
+    return api.post(`/channels/${id}/webhook/regenerate`)
+  },
+
+  // Get channel statistics
+  getStats: async (id: string) => {
+    return api.get(`/channels/${id}/stats`)
+  },
+
+  // Get supported channel types
+  getSupportedTypes: async () => {
+    return api.get('/channels/types')
   },
 }
 
@@ -233,12 +267,19 @@ export const documentsApi = {
     return api.get(`/documents/${id}`)
   },
 
-  upload: async (file: File, metadata?: any) => {
+  upload: async (files: File[] | File, metadata?: any) => {
     const formData = new FormData()
-    formData.append('file', file)
+    
+    // Handle both single file and multiple files
+    const fileArray = Array.isArray(files) ? files : [files]
+    fileArray.forEach((file, index) => {
+      formData.append('files', file)
+    })
+    
     if (metadata) {
       formData.append('metadata', JSON.stringify(metadata))
     }
+    
     return api.post('/documents/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',

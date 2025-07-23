@@ -5,10 +5,12 @@ import { toast } from 'sonner'
 interface User {
   id: string
   email: string
-  name: string
+  firstName: string
+  lastName: string
   role: string
-  tenantId: string
-  status: string
+  tenantId?: string
+  status?: string
+  lastLogin?: Date
 }
 
 interface AuthContextType {
@@ -81,9 +83,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const response = await authApi.login(email, password)
       
       if (response.success && response.data) {
-        const { token, user: userData } = response.data
+        const { tokens, user: userData } = response.data
         
-        localStorage.setItem('authToken', token)
+        localStorage.setItem('authToken', tokens.accessToken)
         localStorage.setItem('user', JSON.stringify(userData))
         setUser(userData)
         
@@ -108,9 +110,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const response = await authApi.register(userData)
       
       if (response.success && response.data) {
-        const { token, user: newUser } = response.data
+        const { tokens, user: newUser } = response.data
         
-        localStorage.setItem('authToken', token)
+        localStorage.setItem('authToken', tokens.accessToken)
         localStorage.setItem('user', JSON.stringify(newUser))
         setUser(newUser)
         
@@ -147,9 +149,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const response = await authApi.refreshToken()
       
       if (response.success && response.data) {
-        const { token, user: userData } = response.data
+        const { tokens, user: userData } = response.data
         
-        localStorage.setItem('authToken', token)
+        localStorage.setItem('authToken', tokens.accessToken)
         localStorage.setItem('user', JSON.stringify(userData))
         setUser(userData)
         

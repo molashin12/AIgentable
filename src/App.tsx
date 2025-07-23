@@ -3,6 +3,7 @@ import { Toaster } from 'sonner'
 import { LanguageProvider } from './contexts/LanguageContext'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
+import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import AgentBuilder from './pages/AgentBuilder'
 import TrainingCenter from './pages/TrainingCenter'
@@ -40,17 +41,33 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
     )
   }
 
-  return isAuthenticated ? <Navigate to="/dashboard" replace /> : <>{children}</>
+  return isAuthenticated ? <Navigate to="/app/dashboard" replace /> : <>{children}</>
+}
+
+// Landing Route Component (show landing page for non-authenticated users)
+function LandingRoute() {
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  return isAuthenticated ? <Navigate to="/app/dashboard" replace /> : <LandingPage />
 }
 
 function AppRoutes() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Routes>
+        <Route path="/" element={<LandingRoute />} />
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
         <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
-        <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="/app" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+          <Route index element={<Navigate to="/app/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="agents" element={<AgentBuilder />} />
           <Route path="training" element={<TrainingCenter />} />
