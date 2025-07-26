@@ -80,7 +80,7 @@ class AuthService {
 
   // Hash password
   public async hashPassword(password: string): Promise<string> {
-    const saltRounds = 12;
+    const saltRounds = 10;
     return bcrypt.hash(password, saltRounds);
   }
 

@@ -46,6 +46,7 @@ import apiKeyRoutes from './routes/apiKeys';
 import searchRoutes from './routes/search';
 import aiProviderRoutes from './routes/aiProviders';
 import systemRoutes from './routes/system';
+import embeddingsRoutes from './routes/embeddings';
 
 // Import socket handlers
 import { initializeSocketHandlers } from './sockets/socketHandlers';
@@ -87,9 +88,6 @@ class AIgentableServer {
     // Suspicious activity detection
     this.app.use(suspiciousActivityDetector);
     
-    // Content type validation
-    this.app.use(validateContentType(['application/json', 'multipart/form-data', 'application/x-www-form-urlencoded']));
-
     // CORS configuration
     this.app.use(cors({
       origin: config.corsOrigin,
@@ -98,8 +96,50 @@ class AIgentableServer {
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-API-Key']
     }));
 
-    // Enhanced rate limiting
-    this.app.use('/api', apiRateLimit);
+    // Body parsing middleware (MUST come before content type validation)
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    
+    // Debug middleware to track request flow
+    this.app.use((req, res, next) => {
+      if (req.path === '/api/v1/auth/register' && req.method === 'POST') {
+        logger.info('=== DEBUG: Request reached body parsing ===', {
+          hasBody: !!req.body,
+          bodyKeys: req.body ? Object.keys(req.body) : [],
+          contentType: req.get('Content-Type'),
+          contentLength: req.get('Content-Length')
+        });
+      }
+      next();
+    });
+    
+    // Content type validation (after body parsing)
+    this.app.use(validateContentType(['application/json', 'multipart/form-data', 'application/x-www-form-urlencoded']));
+    
+    // Debug middleware after content type validation
+    this.app.use((req, res, next) => {
+      if (req.path === '/api/v1/auth/register' && req.method === 'POST') {
+        logger.info('=== DEBUG: Request passed content type validation ===', {
+          path: req.path,
+          method: req.method
+        });
+      }
+      next();
+    });
+
+    // Enhanced rate limiting (temporarily disabled for debugging)
+    // this.app.use('/api', apiRateLimit);
+    
+    // Debug middleware after rate limiting
+    this.app.use('/api/v1/auth/register', (req, res, next) => {
+      if (req.method === 'POST') {
+        logger.info('=== DEBUG: Request passed rate limiting ===', {
+          path: req.path,
+          method: req.method
+        });
+      }
+      next();
+    });
     
     // API request metrics collection
     this.app.use((req, res, next) => {
@@ -113,10 +153,6 @@ class AIgentableServer {
       
       next();
     });
-
-    // Body parsing middleware
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
     // Compression middleware
     this.app.use(compression());
@@ -145,6 +181,19 @@ class AIgentableServer {
   private initializeRoutes(): void {
     const apiPrefix = `/api/${config.apiVersion}`;
 
+    // Debug middleware before routes
+    this.app.use(`${apiPrefix}/auth`, (req, res, next) => {
+      if (req.path === '/register' && req.method === 'POST') {
+        logger.info('=== DEBUG: Request reached auth routes ===', {
+          path: req.path,
+          method: req.method,
+          hasBody: !!req.body,
+          bodyKeys: req.body ? Object.keys(req.body) : []
+        });
+      }
+      next();
+    });
+
     // Public routes (no authentication required)
     this.app.use(`${apiPrefix}/auth`, authRoutes);
     this.app.use(`${apiPrefix}/webhooks`, webhookRoutes);
@@ -160,6 +209,7 @@ class AIgentableServer {
     this.app.use(`${apiPrefix}/api-keys`, authenticate, apiKeyRoutes);
     this.app.use(`${apiPrefix}/ai-providers`, authenticate, aiProviderRoutes);
     this.app.use(`${apiPrefix}/search`, authenticate, searchRoutes);
+    this.app.use(`${apiPrefix}/embeddings`, authenticate, embeddingsRoutes);
     this.app.use(`${apiPrefix}/system`, authenticate, systemRoutes);
 
     // API documentation
@@ -177,7 +227,8 @@ class AIgentableServer {
           conversations: `${apiPrefix}/conversations`,
           analytics: `${apiPrefix}/analytics`,
           webhooks: `${apiPrefix}/webhooks`,
-          aiProviders: `${apiPrefix}/ai-providers`
+          aiProviders: `${apiPrefix}/ai-providers`,
+          embeddings: `${apiPrefix}/embeddings`
         }
       });
     });

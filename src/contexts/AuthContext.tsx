@@ -92,7 +92,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     } catch (error: any) {
       console.error('Login error:', error)
-      toast.error(error.response?.data?.message || 'Login failed')
+      
+      // Handle specific error cases
+      if (error.response?.status === 401) {
+        const errorMessage = error.response?.data?.message || ''
+        if (errorMessage.toLowerCase().includes('user not found') || errorMessage.toLowerCase().includes('invalid credentials')) {
+          toast.error('Invalid email or password. Please check your credentials and try again.')
+        } else {
+          toast.error('Invalid credentials. Please try again.')
+        }
+      } else if (error.response?.status === 404) {
+        toast.error('User not found. Please check your email or register for a new account.')
+      } else if (error.response?.status === 403) {
+        toast.error('Account access denied. Please contact support if you believe this is an error.')
+      } else if (error.response?.status === 429) {
+        toast.error('Too many login attempts. Please wait a few minutes before trying again.')
+      } else if (error.code === 'ECONNABORTED' || error.code === 'NETWORK_ERROR') {
+        toast.error('Connection timeout. Please check your internet connection and try again.')
+      } else if (error.response?.status >= 500) {
+        toast.error('Server error. Please try again later or contact support if the problem persists.')
+      } else {
+        toast.error(error.response?.data?.message || 'Login failed. Please try again.')
+      }
+      
       return false
     } finally {
       setIsLoading(false)
@@ -116,7 +138,34 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     } catch (error: any) {
       console.error('Registration error:', error)
-      toast.error(error.response?.data?.message || 'Registration failed')
+      
+      // Handle specific registration error cases
+      if (error.response?.status === 409) {
+        const errorMessage = error.response?.data?.message || ''
+        if (errorMessage.toLowerCase().includes('organization name')) {
+          toast.error('This organization name is already taken. Please choose a different name.')
+        } else {
+          toast.error('An account with this email already exists. Please try logging in instead.')
+        }
+      } else if (error.response?.status === 400) {
+        const errorMessage = error.response?.data?.message || ''
+        if (errorMessage.toLowerCase().includes('password')) {
+          toast.error('Password does not meet requirements. Please use a stronger password.')
+        } else if (errorMessage.toLowerCase().includes('email')) {
+          toast.error('Please enter a valid email address.')
+        } else {
+          toast.error(errorMessage || 'Invalid registration data. Please check your information.')
+        }
+      } else if (error.response?.status === 429) {
+        toast.error('Too many registration attempts. Please wait a few minutes before trying again.')
+      } else if (error.code === 'ECONNABORTED' || error.code === 'NETWORK_ERROR') {
+        toast.error('Connection timeout. Please check your internet connection and try again.')
+      } else if (error.response?.status >= 500) {
+        toast.error('Server error. Please try again later or contact support if the problem persists.')
+      } else {
+        toast.error(error.response?.data?.message || 'Registration failed. Please try again.')
+      }
+      
       return false
     } finally {
       setIsLoading(false)
@@ -138,15 +187,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await apiClient.getProfile()
       
-      if (response.user) {
-        localStorage.setItem('user', JSON.stringify(response.user))
-        setUser(response.user)
+      // Backend returns data in response.data.user format
+      if (response.data?.user) {
+        localStorage.setItem('user', JSON.stringify(response.data.user))
+        setUser(response.data.user)
         return true
       } else {
         throw new Error('Profile fetch failed')
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Profile fetch error:', error)
+      
+      // Only show error message if it's not a 401 (handled by interceptor)
+      if (error.response?.status !== 401) {
+        if (error.response?.status >= 500) {
+          toast.error('Unable to verify session. Please try logging in again.')
+        }
+      }
+      
       apiClient.clearAuth()
       setUser(null)
       return false

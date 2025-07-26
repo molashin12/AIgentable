@@ -42,17 +42,41 @@ class APIClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (error.response?.status === 401) {
-          this.clearAuth()
-          window.location.href = '/login'
-          toast.error('Session expired. Please login again.')
-        } else if (error.response?.status === 403) {
-          toast.error('Access denied. You do not have permission to perform this action.')
-        } else if (error.response?.status >= 500) {
-          toast.error('Server error. Please try again later.')
-        } else if (error.code === 'ECONNABORTED') {
-          toast.error('Request timeout. Please check your connection.')
+        // Handle network errors
+        if (!error.response) {
+          if (error.code === 'ECONNABORTED') {
+            // Don't show toast here, let the calling component handle it
+            error.isTimeout = true
+          } else if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+            // Don't show toast here, let the calling component handle it
+            error.isNetworkError = true
+          }
+          return Promise.reject(error)
         }
+
+        // Handle HTTP errors
+        if (error.response?.status === 401) {
+          // Only redirect and show toast if this is not a login request
+          const isLoginRequest = error.config?.url?.includes('/auth/login')
+          if (!isLoginRequest) {
+            this.clearAuth()
+            window.location.href = '/login'
+            toast.error('Session expired. Please login again.')
+          }
+        } else if (error.response?.status === 403) {
+          // Don't show toast for auth requests, let the calling component handle it
+          const isAuthRequest = error.config?.url?.includes('/auth/')
+          if (!isAuthRequest) {
+            toast.error('Access denied. You do not have permission to perform this action.')
+          }
+        } else if (error.response?.status >= 500) {
+          // Don't show toast for auth requests, let the calling component handle it
+          const isAuthRequest = error.config?.url?.includes('/auth/')
+          if (!isAuthRequest) {
+            toast.error('Server error. Please try again later.')
+          }
+        }
+        
         return Promise.reject(error)
       }
     )
@@ -85,16 +109,16 @@ class APIClient {
   // Auth methods
   async login(email: string, password: string) {
     const response = await this.client.post('/auth/login', { email, password })
-    const { user, token } = response.data
-    this.setAuth(token, user.tenantId)
-    return response.data
+    const { user, tenant, tokens } = response.data.data
+    this.setAuth(tokens.accessToken, tenant.id)
+    return { user, token: tokens.accessToken, tenant }
   }
 
   async register(userData: any) {
     const response = await this.client.post('/auth/register', userData)
-    const { user, token } = response.data
-    this.setAuth(token, user.tenantId)
-    return response.data
+    const { user, tenant, tokens } = response.data.data
+    this.setAuth(tokens.accessToken, tenant.id)
+    return { user, token: tokens.accessToken, tenant }
   }
 
   async logout() {
@@ -186,7 +210,20 @@ class APIClient {
 
   async getDocuments(params?: any) {
     const response = await this.client.get('/documents', { params })
-    return response.data
+    // Handle the nested response structure from backend
+    const documents = response.data.data?.documents || response.data.documents || response.data.data || response.data
+    
+    // Map backend status to frontend status
+    if (Array.isArray(documents)) {
+      return {
+        documents: documents.map(doc => ({
+          ...doc,
+          status: doc.status === 'COMPLETED' ? 'READY' : doc.status
+        }))
+      }
+    }
+    
+    return { documents: [] }
   }
 
   async deleteDocument(id: string) {
@@ -292,7 +329,20 @@ class APIClient {
 
   async searchDocuments(query: string, params?: any) {
     const response = await this.client.get('/search/documents', { params: { query, ...params } })
-    return response.data
+    // Handle the nested response structure from backend
+    const documents = response.data.data?.documents || response.data.documents || response.data.data || response.data
+    
+    // Map backend status to frontend status
+    if (Array.isArray(documents)) {
+      return {
+        documents: documents.map(doc => ({
+          ...doc,
+          status: doc.status === 'COMPLETED' ? 'READY' : doc.status
+        }))
+      }
+    }
+    
+    return { documents: [] }
   }
 
   async searchAgents(query: string, params?: any) {
@@ -348,6 +398,37 @@ class APIClient {
 
   async updateAiProvider(id: string, providerData: any) {
     const response = await this.client.put(`/ai-providers/${id}`, providerData)
+    return response.data
+  }
+
+  // Embedding methods
+  async generateEmbedding(text: string, provider?: string) {
+    const response = await this.client.post('/embeddings/single', { text, provider })
+    return response.data
+  }
+
+  async generateBatchEmbeddings(texts: string[], provider?: string, batchSize?: number) {
+    const response = await this.client.post('/embeddings/batch', { texts, provider, batchSize })
+    return response.data
+  }
+
+  async calculateTextSimilarity(text1: string, text2: string, provider?: string) {
+    const response = await this.client.post('/embeddings/similarity', { text1, text2, provider })
+    return response.data
+  }
+
+  async findSimilarTexts(queryText: string, candidateTexts: string[], topK?: number, provider?: string) {
+    const response = await this.client.post('/embeddings/similar-texts', {
+      queryText,
+      candidateTexts,
+      topK,
+      provider
+    })
+    return response.data
+  }
+
+  async getEmbeddingProviders() {
+    const response = await this.client.get('/embeddings/providers')
     return response.data
   }
 }

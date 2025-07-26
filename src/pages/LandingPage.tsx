@@ -1,617 +1,680 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { motion, useScroll, useTransform, useInView } from 'framer-motion'
-import {
-  SparklesIcon,
-  ChatBubbleLeftRightIcon,
-  ChartBarIcon,
-  CpuChipIcon,
-  GlobeAltIcon,
-  BoltIcon,
-  ShieldCheckIcon,
-  ArrowRightIcon,
-  PlayIcon,
-  CheckIcon,
-} from '@heroicons/react/24/outline'
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowRightIcon, CheckIcon, StarIcon, LinkIcon, Cog6ToothIcon, RocketLaunchIcon, Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
+import { CpuChipIcon, ChatBubbleLeftRightIcon, ChartBarIcon, BeakerIcon, CommandLineIcon, CloudIcon } from '@heroicons/react/24/solid';
 
-const LandingPage = () => {
-  const [scrollY, setScrollY] = useState(0)
-  const { scrollYProgress } = useScroll()
-  const y = useTransform(scrollYProgress, [0, 1], ['0%', '50%'])
-  const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0.3])
+const LandingPage: React.FC = () => {
+  const navigate = useNavigate();
+  const [scrollY, setScrollY] = useState(0);
+  const [visibleChains, setVisibleChains] = useState<number[]>([]);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const handleScroll = () => setScrollY(window.scrollY)
-    window.addEventListener('scroll', handleScroll)
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
+    const handleScroll = () => setScrollY(window.scrollY);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
-  const features = [
-    {
-      icon: CpuChipIcon,
-      title: 'AI-Powered Agents',
-      description: 'Deploy intelligent conversational agents that understand context and provide human-like interactions across all channels.',
-      gradient: 'from-blue-500 to-cyan-500'
-    },
-    {
-      icon: ChatBubbleLeftRightIcon,
-      title: 'Omnichannel Integration',
-      description: 'Seamlessly connect WhatsApp, Facebook, Instagram, Telegram, and web chat in one unified platform.',
-      gradient: 'from-purple-500 to-pink-500'
-    },
-    {
-      icon: ChartBarIcon,
-      title: 'Advanced Analytics',
-      description: 'Real-time insights and performance metrics to optimize your customer engagement strategies.',
-      gradient: 'from-green-500 to-emerald-500'
-    },
-    {
-      icon: BoltIcon,
-      title: 'Lightning Fast',
-      description: 'Sub-second response times with enterprise-grade infrastructure and global CDN deployment.',
-      gradient: 'from-yellow-500 to-orange-500'
-    },
-    {
-      icon: ShieldCheckIcon,
-      title: 'Enterprise Security',
-      description: 'Bank-level encryption, GDPR compliance, and SOC 2 Type II certified infrastructure.',
-      gradient: 'from-red-500 to-rose-500'
-    },
-    {
-      icon: GlobeAltIcon,
-      title: 'Global Scale',
-      description: 'Multi-language support with automatic translation and cultural context awareness.',
-      gradient: 'from-indigo-500 to-blue-500'
-    }
-  ]
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const chainIndex = parseInt(entry.target.getAttribute('data-chain') || '0');
+            setVisibleChains(prev => [...prev, chainIndex].filter((v, i, a) => a.indexOf(v) === i));
+          }
+        });
+      },
+      { threshold: 0.3 }
+    );
 
-  const stats = [
-    { value: '99.9%', label: 'Uptime SLA' },
-    { value: '<100ms', label: 'Response Time' },
-    { value: '50+', label: 'Languages' },
-    { value: '24/7', label: 'Support' }
-  ]
+    const chainElements = document.querySelectorAll('[data-chain]');
+    chainElements.forEach(el => observer.observe(el));
 
-  const pricingPlans = [
-    {
-      name: 'Starter',
-      price: '$29',
-      period: '/month',
-      description: 'Perfect for small businesses',
-      features: [
-        '1 AI Agent',
-        '1,000 conversations/month',
-        '2 channels',
-        'Basic analytics',
-        'Email support'
-      ],
-      popular: false
-    },
-    {
-      name: 'Professional',
-      price: '$99',
-      period: '/month',
-      description: 'Ideal for growing companies',
-      features: [
-        '5 AI Agents',
-        '10,000 conversations/month',
-        'All channels',
-        'Advanced analytics',
-        'Priority support',
-        'Custom integrations'
-      ],
-      popular: true
-    },
-    {
-      name: 'Enterprise',
-      price: 'Custom',
-      period: '',
-      description: 'For large organizations',
-      features: [
-        'Unlimited AI Agents',
-        'Unlimited conversations',
-        'All channels + API',
-        'Custom analytics',
-        'Dedicated support',
-        'On-premise deployment'
-      ],
-      popular: false
-    }
-  ]
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white overflow-hidden scroll-smooth">
-      {/* Animated Background */}
-      <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900/20 to-purple-900/20" />
-        <div 
-          className="absolute inset-0 opacity-30"
-          style={{
-            background: `radial-gradient(circle at ${50 + scrollY * 0.01}% ${50 + scrollY * 0.005}%, rgba(59, 130, 246, 0.1) 0%, transparent 50%)`
-          }}
-        />
-        {/* Floating particles */}
-        <div className="absolute inset-0">
-          {[...Array(20)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute w-1 h-1 bg-blue-400 rounded-full"
-              style={{
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * 100}%`
-              }}
-              animate={{
-                y: [0, -30, 0],
-                opacity: [0.3, 1, 0.3],
-                scale: [1, 1.5, 1]
-              }}
-              transition={{
-                duration: 2 + Math.random() * 3,
-                repeat: Infinity,
-                delay: Math.random() * 3,
-                ease: "easeInOut"
-              }}
-            />
-          ))}
-        </div>
-        
-
-      </div>
-
+    <div className="min-h-screen bg-white">
       {/* Navigation */}
-      <nav className="relative z-50 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
-              <CpuChipIcon className="w-6 h-6 text-white" />
+      <nav className="fixed top-0 w-full bg-white/80 backdrop-blur-md border-b border-gray-100 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-2">
+              <CpuChipIcon className="h-8 w-8 text-blue-600" />
+              <span className="text-xl font-bold text-gray-900">AIgentable</span>
             </div>
-            <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-              AIgentable
-            </span>
+            
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center space-x-8">
+              <a href="#features" className="text-gray-600 hover:text-gray-900 transition-colors">Features</a>
+              <a href="#pricing" className="text-gray-600 hover:text-gray-900 transition-colors">Pricing</a>
+              <a href="#about" className="text-gray-600 hover:text-gray-900 transition-colors">About</a>
+              <div className="flex items-center space-x-3">
+                <button 
+                  onClick={() => navigate('/login')}
+                  className="text-gray-600 hover:text-gray-900 px-4 py-2 rounded-lg transition-colors"
+                >
+                  Sign In
+                </button>
+                <button 
+                  onClick={() => navigate('/register')}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Get Started
+                </button>
+              </div>
+            </div>
+            
+            {/* Mobile menu button */}
+            <div className="md:hidden">
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="text-gray-600 hover:text-gray-900 p-2"
+              >
+                {mobileMenuOpen ? (
+                  <XMarkIcon className="h-6 w-6" />
+                ) : (
+                  <Bars3Icon className="h-6 w-6" />
+                )}
+              </button>
+            </div>
           </div>
-          <div className="hidden md:flex items-center space-x-8">
-            <a href="#features" className="text-gray-300 hover:text-white transition-colors">Features</a>
-            <a href="#pricing" className="text-gray-300 hover:text-white transition-colors">Pricing</a>
-            <a href="#about" className="text-gray-300 hover:text-white transition-colors">About</a>
-            <Link 
-              to="/login" 
-              className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-105"
-            >
-              Get Started
-            </Link>
-          </div>
+          
+          {/* Mobile Navigation Menu */}
+          {mobileMenuOpen && (
+            <div className="md:hidden border-t border-gray-100 bg-white/95 backdrop-blur-md">
+              <div className="px-2 pt-2 pb-3 space-y-1">
+                <a href="#features" className="block px-3 py-2 text-gray-600 hover:text-gray-900 transition-colors">Features</a>
+                <a href="#pricing" className="block px-3 py-2 text-gray-600 hover:text-gray-900 transition-colors">Pricing</a>
+                <a href="#about" className="block px-3 py-2 text-gray-600 hover:text-gray-900 transition-colors">About</a>
+                <div className="pt-2 space-y-2">
+                  <button 
+                    onClick={() => {
+                      navigate('/login');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="block w-full text-left px-3 py-2 text-gray-600 hover:text-gray-900 transition-colors"
+                  >
+                    Sign In
+                  </button>
+                  <button 
+                    onClick={() => {
+                      navigate('/register');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="block w-full bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors mx-3"
+                  >
+                    Get Started
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </nav>
 
       {/* Hero Section */}
-      <motion.section 
-        className="relative z-10 px-6 py-20"
-        style={{ y, opacity }}
-      >
-        <div className="max-w-7xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-          >
-            <motion.div 
-              className="inline-flex items-center px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full mb-8"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-            >
-              <SparklesIcon className="w-5 h-5 text-blue-400 mr-2" />
-              <span className="text-blue-400 text-sm font-medium">Next-Generation AI Customer Engagement</span>
-            </motion.div>
-            
-            <motion.h1 
-              className="text-5xl md:text-7xl font-bold mb-6 leading-tight"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.3 }}
-            >
-              Transform Customer
-              <motion.span 
-                className="block bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent"
-                initial={{ opacity: 0, x: -50 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.8, delay: 0.5 }}
-              >
-                Conversations
-              </motion.span>
-              with AI Agents
-            </motion.h1>
-            
-            <motion.p 
-              className="text-xl md:text-2xl text-gray-300 mb-12 max-w-4xl mx-auto leading-relaxed"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.6 }}
-            >
-              Deploy intelligent AI agents across all communication channels. 
-              Automate customer support, boost engagement, and scale your business 
-              with enterprise-grade conversational AI.
-            </motion.p>
-            
-            <motion.div 
-              className="flex flex-col sm:flex-row items-center justify-center gap-6"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.8 }}
-            >
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Link 
-                  to="/register"
-                  className="group px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl text-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:shadow-2xl hover:shadow-blue-500/25 flex items-center"
-                >
-                  Start Free Trial
-                  <ArrowRightIcon className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </motion.div>
-              <motion.button 
-                className="group px-8 py-4 border border-gray-600 rounded-xl text-lg font-semibold hover:border-gray-400 transition-all duration-300 flex items-center"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <PlayIcon className="w-5 h-5 mr-2" />
-                Watch Demo
-              </motion.button>
-            </motion.div>
-          </motion.div>
-        </div>
-      </motion.section>
-
-      {/* Stats Section */}
-      <motion.section 
-        className="relative z-10 px-6 py-16"
-        initial={{ opacity: 0 }}
-        whileInView={{ opacity: 1 }}
-        transition={{ duration: 0.8 }}
-        viewport={{ once: true }}
-      >
+      <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, index) => (
-              <motion.div 
-                key={index}
-                className="text-center"
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: index * 0.1 }}
-                viewport={{ once: true }}
-                whileHover={{ scale: 1.05 }}
+          <div className="text-center">
+            <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+              Build Intelligent
+              <span className="text-blue-600 block">AI Agents</span>
+            </h1>
+            <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
+              The complete platform for creating, deploying, and managing AI agents that transform your business operations with intelligent automation.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <button 
+                onClick={() => navigate('/register')}
+                className="bg-blue-600 text-white px-8 py-4 rounded-lg text-lg font-medium hover:bg-blue-700 transition-all duration-200 flex items-center justify-center group"
               >
-                <motion.div 
-                  className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-2"
-                  initial={{ scale: 0 }}
-                  whileInView={{ scale: 1 }}
-                  transition={{ duration: 0.5, delay: index * 0.1 + 0.3, type: "spring", stiffness: 200 }}
-                  viewport={{ once: true }}
-                >
-                  {stat.value}
-                </motion.div>
-                <div className="text-gray-400 text-sm md:text-base">{stat.label}</div>
-              </motion.div>
-            ))}
+                Start Building
+                <ArrowRightIcon className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+              </button>
+              <button className="border border-gray-300 text-gray-700 px-8 py-4 rounded-lg text-lg font-medium hover:border-gray-400 transition-colors">
+                Watch Demo
+              </button>
+            </div>
           </div>
         </div>
-      </motion.section>
+      </section>
+
+      {/* AI Agent Building Chain */}
+      <section className="py-20 bg-gradient-to-br from-blue-50 to-indigo-100 relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">Build AI Agents in Minutes</h2>
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              Watch how our intelligent platform guides you through the agent creation process with seamless automation.
+            </p>
+          </div>
+          
+          <div className="relative">
+            {/* Chain Animation Container */}
+            <div className="flex flex-col lg:flex-row items-center justify-between space-y-12 lg:space-y-0 lg:space-x-8">
+              
+              {/* Step 1: Design */}
+              <div 
+                data-chain="1"
+                className={`relative bg-white p-8 rounded-2xl shadow-lg transform transition-all duration-1000 ${
+                  visibleChains.includes(1) ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+                }`}
+              >
+                <div className="absolute -top-4 -right-4 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                  1
+                </div>
+                <div className="bg-blue-100 w-16 h-16 rounded-xl flex items-center justify-center mb-6 mx-auto">
+                  <BeakerIcon className="h-8 w-8 text-blue-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-4 text-center">Design & Configure</h3>
+                <p className="text-gray-600 text-center mb-6">
+                  Define your agent's personality, knowledge base, and conversation flows with our intuitive visual builder.
+                </p>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <img 
+                    src="https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=modern%20AI%20agent%20configuration%20interface%20with%20drag%20and%20drop%20elements%2C%20clean%20UI%20design%2C%20blue%20and%20white%20color%20scheme&image_size=landscape_4_3" 
+                    alt="Agent Design Interface" 
+                    className="w-full h-32 object-cover rounded-lg"
+                  />
+                </div>
+              </div>
+              
+              {/* Chain Link 1 */}
+              <div className={`hidden lg:block transition-all duration-1000 delay-500 ${
+                visibleChains.includes(1) ? 'opacity-100' : 'opacity-0'
+              }`}>
+                <div className="flex items-center">
+                  <div className="w-8 h-0.5 bg-gradient-to-r from-blue-400 to-green-400 animate-pulse"></div>
+                  <LinkIcon className="h-6 w-6 text-blue-500 mx-2" />
+                  <div className="w-8 h-0.5 bg-gradient-to-r from-blue-400 to-green-400 animate-pulse"></div>
+                </div>
+              </div>
+              
+              {/* Step 2: Train */}
+              <div 
+                data-chain="2"
+                className={`relative bg-white p-8 rounded-2xl shadow-lg transform transition-all duration-1000 delay-300 ${
+                  visibleChains.includes(2) ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+                }`}
+              >
+                <div className="absolute -top-4 -right-4 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                  2
+                </div>
+                <div className="bg-green-100 w-16 h-16 rounded-xl flex items-center justify-center mb-6 mx-auto">
+                  <CommandLineIcon className="h-8 w-8 text-green-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-4 text-center">Train & Optimize</h3>
+                <p className="text-gray-600 text-center mb-6">
+                  Upload your data, train the AI model, and fine-tune responses for optimal performance.
+                </p>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <img 
+                    src="https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=AI%20training%20dashboard%20with%20data%20visualization%2C%20progress%20bars%2C%20neural%20network%20diagrams%2C%20modern%20interface&image_size=landscape_4_3" 
+                    alt="AI Training Dashboard" 
+                    className="w-full h-32 object-cover rounded-lg"
+                  />
+                </div>
+              </div>
+              
+              {/* Chain Link 2 */}
+              <div className={`hidden lg:block transition-all duration-1000 delay-700 ${
+                visibleChains.includes(2) ? 'opacity-100' : 'opacity-0'
+              }`}>
+                <div className="flex items-center">
+                  <div className="w-8 h-0.5 bg-gradient-to-r from-green-400 to-purple-400 animate-pulse"></div>
+                  <LinkIcon className="h-6 w-6 text-green-500 mx-2" />
+                  <div className="w-8 h-0.5 bg-gradient-to-r from-green-400 to-purple-400 animate-pulse"></div>
+                </div>
+              </div>
+              
+              {/* Step 3: Deploy */}
+              <div 
+                data-chain="3"
+                className={`relative bg-white p-8 rounded-2xl shadow-lg transform transition-all duration-1000 delay-600 ${
+                  visibleChains.includes(3) ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+                }`}
+              >
+                <div className="absolute -top-4 -right-4 w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                  3
+                </div>
+                <div className="bg-purple-100 w-16 h-16 rounded-xl flex items-center justify-center mb-6 mx-auto">
+                  <RocketLaunchIcon className="h-8 w-8 text-purple-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-4 text-center">Deploy & Scale</h3>
+                <p className="text-gray-600 text-center mb-6">
+                  Launch your agent across multiple channels and monitor performance in real-time.
+                </p>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <img 
+                    src="https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=multi%2Dchannel%20deployment%20interface%20showing%20WhatsApp%2C%20Facebook%2C%20web%20chat%20integrations%2C%20analytics%20dashboard&image_size=landscape_4_3" 
+                    alt="Multi-Channel Deployment" 
+                    className="w-full h-32 object-cover rounded-lg"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            {/* Floating Animation Elements */}
+            <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+              <div className={`absolute top-1/4 left-1/4 w-2 h-2 bg-blue-400 rounded-full animate-bounce transition-opacity duration-1000 ${
+                visibleChains.includes(1) ? 'opacity-100' : 'opacity-0'
+              }`} style={{ animationDelay: '0s' }}></div>
+              <div className={`absolute top-1/3 right-1/4 w-2 h-2 bg-green-400 rounded-full animate-bounce transition-opacity duration-1000 ${
+                visibleChains.includes(2) ? 'opacity-100' : 'opacity-0'
+              }`} style={{ animationDelay: '1s' }}></div>
+              <div className={`absolute bottom-1/4 left-1/3 w-2 h-2 bg-purple-400 rounded-full animate-bounce transition-opacity duration-1000 ${
+                visibleChains.includes(3) ? 'opacity-100' : 'opacity-0'
+              }`} style={{ animationDelay: '2s' }}></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Project Highlights Showcase */}
+      <section className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">Platform Highlights</h2>
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              Discover the powerful features that make AIgentable the leading AI agent platform.
+            </p>
+          </div>
+          
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            {/* Real-time Chat Interface */}
+            <div className="order-2 lg:order-1">
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-2xl">
+                <img 
+                  src="https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=modern%20real%2Dtime%20chat%20interface%20with%20AI%20agent%20responses%2C%20typing%20indicators%2C%20message%20bubbles%2C%20clean%20UI&image_size=landscape_16_9" 
+                  alt="Real-time Chat Interface" 
+                  className="w-full h-64 object-cover rounded-xl shadow-lg"
+                />
+              </div>
+            </div>
+            <div className="order-1 lg:order-2">
+              <h3 className="text-3xl font-bold text-gray-900 mb-6">Real-time Conversations</h3>
+              <p className="text-lg text-gray-600 mb-6">
+                Experience lightning-fast AI responses with our advanced real-time chat system. 
+                Watch typing indicators, see instant message delivery, and enjoy seamless conversations.
+              </p>
+              <ul className="space-y-3">
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">WebSocket-powered real-time messaging</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Live typing indicators and presence</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Multi-user conversation support</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+          
+          <div className="grid lg:grid-cols-2 gap-12 items-center mt-20">
+            {/* Analytics Dashboard */}
+            <div>
+              <h3 className="text-3xl font-bold text-gray-900 mb-6">Advanced Analytics</h3>
+              <p className="text-lg text-gray-600 mb-6">
+                Monitor your AI agents' performance with comprehensive analytics and insights. 
+                Track conversations, measure satisfaction, and optimize your agents continuously.
+              </p>
+              <ul className="space-y-3">
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Real-time performance metrics</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Customer satisfaction tracking</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Conversation flow analysis</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-8 rounded-2xl">
+                <img 
+                  src="https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=analytics%20dashboard%20with%20charts%2C%20graphs%2C%20KPI%20metrics%2C%20conversation%20statistics%2C%20modern%20data%20visualization&image_size=landscape_16_9" 
+                  alt="Analytics Dashboard" 
+                  className="w-full h-64 object-cover rounded-xl shadow-lg"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div className="grid lg:grid-cols-2 gap-12 items-center mt-20">
+            {/* Agent Builder Interface */}
+            <div className="order-2 lg:order-1">
+              <div className="bg-gradient-to-br from-purple-50 to-violet-50 p-8 rounded-2xl">
+                <img 
+                  src="https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=AI%20agent%20builder%20interface%20with%20drag%20and%20drop%20components%2C%20workflow%20designer%2C%20visual%20programming&image_size=landscape_16_9" 
+                  alt="Agent Builder Interface" 
+                  className="w-full h-64 object-cover rounded-xl shadow-lg"
+                />
+              </div>
+            </div>
+            <div className="order-1 lg:order-2">
+              <h3 className="text-3xl font-bold text-gray-900 mb-6">Visual Agent Builder</h3>
+              <p className="text-lg text-gray-600 mb-6">
+                Create sophisticated AI agents without coding using our intuitive visual builder. 
+                Design conversation flows, set up integrations, and customize behaviors with ease.
+              </p>
+              <ul className="space-y-3">
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Drag-and-drop interface design</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Pre-built templates and components</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Real-time testing and preview</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Features Section */}
-      <motion.section 
-        id="features" 
-        className="relative z-10 px-6 py-20"
-        initial={{ opacity: 0 }}
-        whileInView={{ opacity: 1 }}
-        transition={{ duration: 0.8 }}
-        viewport={{ once: true }}
-      >
-        <div className="max-w-7xl mx-auto">
-          <motion.div 
-            className="text-center mb-16"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-            viewport={{ once: true }}
-          >
-            <motion.h2 
-              className="text-4xl md:text-5xl font-bold mb-6"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              viewport={{ once: true }}
-            >
-              Powerful Features for
-              <motion.span 
-                className="block bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent"
-                initial={{ opacity: 0, scale: 0.8 }}
-                whileInView={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.6, delay: 0.4 }}
-                viewport={{ once: true }}
-              >
-                Modern Businesses
-              </motion.span>
-            </motion.h2>
-            <motion.p 
-              className="text-xl text-gray-300 max-w-3xl mx-auto"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.6 }}
-              viewport={{ once: true }}
-            >
-              Everything you need to create, deploy, and manage AI-powered customer engagement at scale.
-            </motion.p>
-          </motion.div>
-          
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {features.map((feature, index) => {
-              const Icon = feature.icon
-              return (
-                <motion.div 
-                  key={index}
-                  className="group p-8 bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl hover:border-gray-600 transition-all duration-500 hover:shadow-2xl"
-                  initial={{ opacity: 0, y: 50 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: index * 0.1 }}
-                  viewport={{ once: true }}
-                  whileHover={{ scale: 1.05, y: -5 }}
-                >
-                  <motion.div 
-                    className={`w-14 h-14 bg-gradient-to-r ${feature.gradient} rounded-xl flex items-center justify-center mb-6`}
-                    whileHover={{ scale: 1.1, rotate: 5 }}
-                    transition={{ type: "spring", stiffness: 300 }}
-                  >
-                    <Icon className="w-7 h-7 text-white" />
-                  </motion.div>
-                  <h3 className="text-xl font-bold mb-4 group-hover:text-blue-400 transition-colors">
-                    {feature.title}
-                  </h3>
-                  <p className="text-gray-300 leading-relaxed">
-                    {feature.description}
-                  </p>
-                </motion.div>
-              )
-            })}
+      <section id="features" className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">Everything you need</h2>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Powerful features to build, deploy, and scale AI agents across your organization.
+            </p>
           </div>
-        </div>
-      </motion.section>
-
-      {/* Pricing Section */}
-      <motion.section 
-        id="pricing" 
-        className="relative z-10 px-6 py-20"
-        initial={{ opacity: 0 }}
-        whileInView={{ opacity: 1 }}
-        transition={{ duration: 0.8 }}
-        viewport={{ once: true }}
-      >
-        <div className="max-w-7xl mx-auto">
-          <motion.div 
-            className="text-center mb-16"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-            viewport={{ once: true }}
-          >
-            <motion.h2 
-              className="text-4xl md:text-5xl font-bold mb-6"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              viewport={{ once: true }}
-            >
-              Simple, Transparent
-              <motion.span 
-                className="block bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent"
-                initial={{ opacity: 0, scale: 0.8 }}
-                whileInView={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.6, delay: 0.4 }}
-                viewport={{ once: true }}
-              >
-                Pricing
-              </motion.span>
-            </motion.h2>
-            <motion.p 
-              className="text-xl text-gray-300 max-w-3xl mx-auto"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.6 }}
-              viewport={{ once: true }}
-            >
-              Choose the perfect plan for your business. Start free, scale as you grow.
-            </motion.p>
-          </motion.div>
           
           <div className="grid md:grid-cols-3 gap-8">
-            {pricingPlans.map((plan, index) => (
-              <motion.div 
-                key={index}
-                className={`relative p-8 bg-gray-800/50 backdrop-blur-sm border rounded-2xl transition-all duration-500 ${
-                  plan.popular 
-                    ? 'border-blue-500 shadow-2xl shadow-blue-500/25' 
-                    : 'border-gray-700/50 hover:border-gray-600'
-                }`}
-                initial={{ opacity: 0, y: 50 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: index * 0.1 }}
-                viewport={{ once: true }}
-                whileHover={{ scale: 1.05, y: -10 }}
-              >
-                {plan.popular && (
-                  <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                    <div className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full text-sm font-semibold">
-                      Most Popular
-                    </div>
-                  </div>
-                )}
-                
-                <div className="text-center mb-8">
-                  <h3 className="text-2xl font-bold mb-2">{plan.name}</h3>
-                  <p className="text-gray-400 mb-4">{plan.description}</p>
-                  <div className="flex items-baseline justify-center">
-                    <span className="text-4xl font-bold">{plan.price}</span>
-                    <span className="text-gray-400 ml-1">{plan.period}</span>
-                  </div>
-                </div>
-                
-                <ul className="space-y-4 mb-8">
-                  {plan.features.map((feature, featureIndex) => (
-                    <li key={featureIndex} className="flex items-center">
-                      <CheckIcon className="w-5 h-5 text-green-400 mr-3 flex-shrink-0" />
-                      <span className="text-gray-300">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-                
-                <motion.button 
-                  className={`w-full py-3 rounded-xl font-semibold transition-all duration-300 ${
-                    plan.popular
-                      ? 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white'
-                      : 'border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white'
-                  }`}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {plan.name === 'Enterprise' ? 'Contact Sales' : 'Get Started'}
-                </motion.button>
-              </motion.div>
-            ))}
+            <div className="bg-white p-8 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+              <div className="bg-blue-100 w-12 h-12 rounded-lg flex items-center justify-center mb-6">
+                <ChatBubbleLeftRightIcon className="h-6 w-6 text-blue-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">Multi-Channel Support</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Deploy agents across WhatsApp, Facebook, Instagram, and web chat with unified conversation management.
+              </p>
+            </div>
+            
+            <div className="bg-white p-8 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+              <div className="bg-green-100 w-12 h-12 rounded-lg flex items-center justify-center mb-6">
+                <CpuChipIcon className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">Advanced AI Models</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Powered by state-of-the-art language models with RAG technology for intelligent, context-aware responses.
+              </p>
+            </div>
+            
+            <div className="bg-white p-8 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+              <div className="bg-purple-100 w-12 h-12 rounded-lg flex items-center justify-center mb-6">
+                <ChartBarIcon className="h-6 w-6 text-purple-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">Real-time Analytics</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Monitor performance, track conversations, and optimize your agents with comprehensive analytics dashboards.
+              </p>
+            </div>
           </div>
         </div>
-      </motion.section>
+      </section>
+
+      {/* Social Proof */}
+      <section className="py-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">Trusted by teams worldwide</h2>
+            <p className="text-xl text-gray-600">Join thousands of companies using AIgentable to transform their operations</p>
+          </div>
+          
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-center mb-4">
+                <div className="flex text-yellow-400">
+                  {[...Array(5)].map((_, i) => (
+                    <StarIcon key={i} className="h-5 w-5 fill-current" />
+                  ))}
+                </div>
+              </div>
+              <p className="text-gray-700 mb-4">
+                "AIgentable transformed our customer support. Response times dropped by 80% and satisfaction scores increased dramatically."
+              </p>
+              <div className="flex items-center">
+                <div className="w-10 h-10 bg-gray-300 rounded-full mr-3"></div>
+                <div>
+                  <p className="font-medium text-gray-900">Sarah Chen</p>
+                  <p className="text-sm text-gray-600">Head of Support, TechCorp</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-center mb-4">
+                <div className="flex text-yellow-400">
+                  {[...Array(5)].map((_, i) => (
+                    <StarIcon key={i} className="h-5 w-5 fill-current" />
+                  ))}
+                </div>
+              </div>
+              <p className="text-gray-700 mb-4">
+                "The multi-channel capabilities are incredible. Our agents work seamlessly across all platforms with perfect context."
+              </p>
+              <div className="flex items-center">
+                <div className="w-10 h-10 bg-gray-300 rounded-full mr-3"></div>
+                <div>
+                  <p className="font-medium text-gray-900">Marcus Rodriguez</p>
+                  <p className="text-sm text-gray-600">CTO, RetailPlus</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-center mb-4">
+                <div className="flex text-yellow-400">
+                  {[...Array(5)].map((_, i) => (
+                    <StarIcon key={i} className="h-5 w-5 fill-current" />
+                  ))}
+                </div>
+              </div>
+              <p className="text-gray-700 mb-4">
+                "Implementation was smooth and the results were immediate. Our team loves how easy it is to manage everything."
+              </p>
+              <div className="flex items-center">
+                <div className="w-10 h-10 bg-gray-300 rounded-full mr-3"></div>
+                <div>
+                  <p className="font-medium text-gray-900">Emily Watson</p>
+                  <p className="text-sm text-gray-600">Operations Manager, StartupXYZ</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section id="pricing" className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">Simple, transparent pricing</h2>
+            <p className="text-xl text-gray-600">Choose the plan that fits your needs. Upgrade or downgrade at any time.</p>
+          </div>
+          
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="bg-white p-8 rounded-xl border border-gray-200">
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Starter</h3>
+              <p className="text-gray-600 mb-6">Perfect for small teams getting started</p>
+              <div className="mb-6">
+                <span className="text-4xl font-bold text-gray-900">$29</span>
+                <span className="text-gray-600">/month</span>
+              </div>
+              <ul className="space-y-3 mb-8">
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Up to 1,000 conversations/month</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">2 AI agents</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Basic analytics</span>
+                </li>
+              </ul>
+              <button 
+                onClick={() => navigate('/register')}
+                className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg hover:border-gray-400 transition-colors"
+              >
+                Get Started
+              </button>
+            </div>
+            
+            <div className="bg-white p-8 rounded-xl border-2 border-blue-500 relative">
+              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                <span className="bg-blue-500 text-white px-3 py-1 rounded-full text-sm font-medium">Most Popular</span>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Professional</h3>
+              <p className="text-gray-600 mb-6">For growing businesses</p>
+              <div className="mb-6">
+                <span className="text-4xl font-bold text-gray-900">$99</span>
+                <span className="text-gray-600">/month</span>
+              </div>
+              <ul className="space-y-3 mb-8">
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Up to 10,000 conversations/month</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">10 AI agents</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Advanced analytics</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Multi-channel support</span>
+                </li>
+              </ul>
+              <button 
+                onClick={() => navigate('/register')}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Get Started
+              </button>
+            </div>
+            
+            <div className="bg-white p-8 rounded-xl border border-gray-200">
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Enterprise</h3>
+              <p className="text-gray-600 mb-6">For large organizations</p>
+              <div className="mb-6">
+                <span className="text-4xl font-bold text-gray-900">Custom</span>
+              </div>
+              <ul className="space-y-3 mb-8">
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Unlimited conversations</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Unlimited AI agents</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Custom integrations</span>
+                </li>
+                <li className="flex items-center">
+                  <CheckIcon className="h-5 w-5 text-green-500 mr-3" />
+                  <span className="text-gray-700">Dedicated support</span>
+                </li>
+              </ul>
+              <button 
+                onClick={() => navigate('/contact')}
+                className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg hover:border-gray-400 transition-colors"
+              >
+                Contact Sales
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* CTA Section */}
-      <motion.section 
-        className="relative z-10 px-6 py-20"
-        initial={{ opacity: 0 }}
-        whileInView={{ opacity: 1 }}
-        transition={{ duration: 0.8 }}
-        viewport={{ once: true }}
-      >
-        <div className="max-w-4xl mx-auto text-center">
-          <motion.div 
-            className="p-12 bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-3xl backdrop-blur-sm"
-            initial={{ opacity: 0, scale: 0.9 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            viewport={{ once: true }}
-            whileHover={{ scale: 1.02 }}
+      <section className="py-20">
+        <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
+          <h2 className="text-4xl font-bold text-gray-900 mb-6">
+            Ready to transform your business?
+          </h2>
+          <p className="text-xl text-gray-600 mb-8">
+            Join thousands of companies already using AIgentable to automate their operations and delight their customers.
+          </p>
+          <button 
+            onClick={() => navigate('/register')}
+            className="bg-blue-600 text-white px-8 py-4 rounded-lg text-lg font-medium hover:bg-blue-700 transition-all duration-200 inline-flex items-center group"
           >
-            <motion.h2 
-              className="text-4xl md:text-5xl font-bold mb-6"
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              viewport={{ once: true }}
-            >
-              Ready to Transform Your
-              <motion.span 
-                className="block bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent"
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.6, delay: 0.6 }}
-                viewport={{ once: true }}
-              >
-                Customer Experience?
-              </motion.span>
-            </motion.h2>
-            <motion.p 
-              className="text-xl text-gray-300 mb-8 max-w-2xl mx-auto"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.8 }}
-              viewport={{ once: true }}
-            >
-              Join thousands of businesses already using AIgentable to automate customer support and boost engagement.
-            </motion.p>
-            <motion.div 
-              className="flex flex-col sm:flex-row items-center justify-center gap-6"
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 1.0 }}
-              viewport={{ once: true }}
-            >
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Link 
-                  to="/register"
-                  className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl text-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:shadow-2xl hover:shadow-blue-500/25"
-                >
-                  Start Free Trial
-                </Link>
-              </motion.div>
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Link 
-                  to="/login"
-                  className="px-8 py-4 border border-gray-600 rounded-xl text-lg font-semibold hover:border-gray-400 transition-all duration-300"
-                >
-                  Sign In
-                </Link>
-              </motion.div>
-            </motion.div>
-          </motion.div>
+            Start Your Free Trial
+            <ArrowRightIcon className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+          </button>
         </div>
-      </motion.section>
+      </section>
 
       {/* Footer */}
-      <motion.footer 
-        className="relative z-10 px-6 py-12 border-t border-gray-800"
-        initial={{ opacity: 0 }}
-        whileInView={{ opacity: 1 }}
-        transition={{ duration: 0.8 }}
-        viewport={{ once: true }}
-      >
-        <div className="max-w-7xl mx-auto">
-          <motion.div 
-            className="flex flex-col md:flex-row items-center justify-between"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            viewport={{ once: true }}
-          >
-            <motion.div 
-              className="flex items-center space-x-3 mb-4 md:mb-0"
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              viewport={{ once: true }}
-            >
-              <motion.div 
-                className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center"
-                whileHover={{ scale: 1.1, rotate: 5 }}
-                transition={{ type: "spring", stiffness: 300 }}
-              >
-                <CpuChipIcon className="w-5 h-5 text-white" />
-              </motion.div>
-              <span className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                AIgentable
-              </span>
-            </motion.div>
-            <motion.div 
-              className="flex items-center space-x-6 text-gray-400"
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              viewport={{ once: true }}
-            >
-              <a href="#" className="hover:text-white transition-colors">Privacy</a>
-              <a href="#" className="hover:text-white transition-colors">Terms</a>
-              <a href="#" className="hover:text-white transition-colors">Support</a>
-              <span>&copy; 2024 AIgentable. All rights reserved.</span>
-            </motion.div>
-          </motion.div>
+      <footer className="bg-gray-900 text-white py-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid md:grid-cols-4 gap-8">
+            <div>
+              <div className="flex items-center space-x-2 mb-4">
+                <CpuChipIcon className="h-8 w-8 text-blue-400" />
+                <span className="text-xl font-bold">AIgentable</span>
+              </div>
+              <p className="text-gray-400">
+                The complete platform for building intelligent AI agents.
+              </p>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-4">Product</h4>
+              <ul className="space-y-2 text-gray-400">
+                <li><a href="#" className="hover:text-white transition-colors">Features</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Pricing</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Documentation</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-4">Company</h4>
+              <ul className="space-y-2 text-gray-400">
+                <li><a href="#" className="hover:text-white transition-colors">About</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Blog</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-4">Support</h4>
+              <ul className="space-y-2 text-gray-400">
+                <li><a href="#" className="hover:text-white transition-colors">Help Center</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Contact</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Status</a></li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
+            <p>&copy; 2024 AIgentable. All rights reserved.</p>
+          </div>
         </div>
-      </motion.footer>
+      </footer>
     </div>
-  )
-}
+  );
+};
 
-export default LandingPage
+export default LandingPage;

@@ -243,6 +243,11 @@ class MonitoringService extends EventEmitter {
    * Check for alert conditions
    */
   private async checkAlerts(metrics: SystemMetrics): Promise<void> {
+    // Skip alerts in development environment
+    if (config.nodeEnv === 'development') {
+      return;
+    }
+    
     const alerts: Alert[] = [];
 
     // Memory usage alert

@@ -6,8 +6,10 @@ export interface Agent {
   id: string
   name: string
   description: string
-  personality: string
+  type: string
+  personality: string | { traits: string[]; tone: string; style: string }
   instructions: string
+  systemPrompt?: string
   model: string
   temperature: number
   maxTokens: number

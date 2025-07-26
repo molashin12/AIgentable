@@ -45,28 +45,28 @@ export default function Dashboard() {
   const metrics = dashboardMetrics ? [
     {
       name: 'Active Agents',
-      value: dashboardMetrics.totalAgents.toString(),
+      value: (dashboardMetrics.totalAgents ?? 0).toString(),
       change: '+2.5%',
       changeType: 'positive',
       icon: CpuChipIcon,
     },
     {
       name: 'Active Conversations',
-      value: dashboardMetrics.activeConversations.toString(),
+      value: (dashboardMetrics.activeConversations ?? 0).toString(),
       change: '+12.3%',
       changeType: 'positive',
       icon: ChatBubbleLeftRightIcon,
     },
     {
       name: 'Total Messages',
-      value: dashboardMetrics.totalMessages.toLocaleString(),
+      value: (dashboardMetrics.totalMessages ?? 0).toLocaleString(),
       change: '+1.2%',
       changeType: 'positive',
       icon: ChartBarIcon,
     },
     {
       name: 'Avg Response Time',
-      value: `${dashboardMetrics.avgResponseTime}s`,
+      value: `${dashboardMetrics.avgResponseTime ?? 0}s`,
       change: '-5.7%',
       changeType: 'positive',
       icon: UserGroupIcon,

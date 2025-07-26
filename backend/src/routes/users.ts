@@ -1,5 +1,6 @@
 import express from 'express';
 import { Request, Response } from 'express';
+import { UserRole } from '@prisma/client';
 import { prisma } from '../config/database';
 import { authenticate, requireTenant, authorize, AuthenticatedRequest } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery, userSchemas, validateId, validatePagination } from '../utils/validation';
@@ -36,7 +37,7 @@ const emailTransporter = nodemailer.createTransport({
 // Get all users (admin only)
 router.get('/', 
   requireTenant,
-  authorize('TENANT_ADMIN'),
+  authorize(UserRole.BUSINESS_OWNER),
   validatePagination,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { page, limit, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
@@ -104,7 +105,7 @@ router.get('/:id',
     const currentUserRole = req.user!.role;
 
     // Users can view their own profile, admins can view any user in their tenant
-    if (id !== currentUserId && currentUserRole !== 'ADMIN') {
+    if (id !== currentUserId && currentUserRole !== UserRole.BUSINESS_OWNER) {
       throw new AuthorizationError('You can only view your own profile');
     }
 
@@ -144,7 +145,7 @@ router.get('/:id',
 // Create new user (admin only)
 router.post('/', 
   requireTenant,
-  authorize('TENANT_ADMIN'),
+  authorize('BUSINESS_OWNER'),
   validateBody(userSchemas.inviteUser),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { firstName, lastName, email, role, sendInvitation } = req.body;
@@ -170,7 +171,7 @@ router.post('/',
         lastName,
         email,
         password: hashedPassword,
-        role: role || 'TENANT_USER',
+        role: role || UserRole.TEAM_MEMBER,
         status: 'ACTIVE',
         tenantId,
       },
@@ -258,7 +259,7 @@ router.put('/:id',
     const updateData = req.body;
 
     // Users can update their own profile, admins can update any user in their tenant
-    if (id !== currentUserId && currentUserRole !== 'TENANT_ADMIN') {
+    if (id !== currentUserId && currentUserRole !== UserRole.BUSINESS_OWNER) {
       throw new AuthorizationError('You can only update your own profile');
     }
 
@@ -272,7 +273,7 @@ router.put('/:id',
     }
 
     // Non-admin users cannot change role or status
-    if (currentUserRole !== 'TENANT_ADMIN') {
+    if (currentUserRole !== UserRole.BUSINESS_OWNER) {
       delete updateData.role;
       delete updateData.status;
     }
@@ -325,7 +326,7 @@ router.put('/:id',
 // Delete user (admin only)
 router.delete('/:id', 
   requireTenant,
-  authorize('TENANT_ADMIN'),
+  authorize(UserRole.BUSINESS_OWNER),
   validateId,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
@@ -347,11 +348,11 @@ router.delete('/:id',
     }
 
     // Check if user is the last admin
-    if (user.role === 'TENANT_ADMIN') {
+    if (user.role === UserRole.BUSINESS_OWNER) {
       const adminCount = await prisma.user.count({
         where: {
           tenantId,
-          role: 'TENANT_ADMIN',
+          role: UserRole.BUSINESS_OWNER,
           status: 'ACTIVE',
         },
       });
@@ -399,7 +400,7 @@ router.post('/:id/change-password',
     const currentUserRole = req.user!.role;
 
     // Users can change their own password, admins can change any user's password
-    if (id !== currentUserId && currentUserRole !== 'TENANT_ADMIN') {
+    if (id !== currentUserId && currentUserRole !== UserRole.BUSINESS_OWNER) {
       throw new AuthorizationError('You can only change your own password');
     }
 
@@ -448,7 +449,7 @@ router.post('/:id/change-password',
 // Resend invitation (admin only)
 router.post('/:id/resend-invitation', 
   requireTenant,
-  authorize('TENANT_ADMIN'),
+  authorize(UserRole.BUSINESS_OWNER),
   validateId,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
@@ -527,7 +528,7 @@ router.post('/:id/resend-invitation',
 // Update user status (admin only)
 router.patch('/:id/status', 
   requireTenant,
-  authorize('TENANT_ADMIN'),
+  authorize(UserRole.BUSINESS_OWNER),
   validateId,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
@@ -554,11 +555,11 @@ router.patch('/:id/status',
     }
 
     // Check if user is the last admin
-    if (user.role === 'TENANT_ADMIN' && status !== 'ACTIVE') {
+    if (user.role === UserRole.BUSINESS_OWNER && status !== 'ACTIVE') {
       const adminCount = await prisma.user.count({
         where: {
           tenantId,
-          role: 'TENANT_ADMIN',
+          role: UserRole.BUSINESS_OWNER,
           status: 'ACTIVE',
         },
       });
@@ -604,7 +605,7 @@ router.patch('/:id/status',
 // Get user activity log (admin only)
 router.get('/:id/activity', 
   requireTenant,
-  authorize('TENANT_ADMIN'),
+  authorize(UserRole.BUSINESS_OWNER),
   validateId,
   validatePagination,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

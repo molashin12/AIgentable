@@ -31,6 +31,7 @@ interface Config {
   // ChromaDB
   chromaHost: string;
   chromaPort: number;
+  chromaUrl: string;
   chromaCollectionName: string;
   
   // AI Provider
@@ -152,7 +153,7 @@ const getEnvArray = (name: string, defaultValue: string[] = []): string[] => {
 
 export const config: Config = {
   // Server Configuration
-  port: getEnvNumber('PORT', 3001),
+  port: getEnvNumber('PORT', 3000),
   nodeEnv: getEnvVar('NODE_ENV', 'development'),
   apiVersion: getEnvVar('API_VERSION', 'v1'),
   
@@ -179,6 +180,7 @@ export const config: Config = {
   // ChromaDB Configuration
   chromaHost: getEnvVar('CHROMA_HOST', 'localhost'),
   chromaPort: getEnvNumber('CHROMA_PORT', 8000),
+  chromaUrl: getEnvVar('CHROMA_URL', 'http://localhost:8000'),
   chromaCollectionName: getEnvVar('CHROMA_COLLECTION_NAME', 'aigentable_vectors'),
   
   // AI Provider Configuration
@@ -192,7 +194,7 @@ export const config: Config = {
   // Gemini Configuration
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: getEnvVar('GEMINI_MODEL', 'gemini-pro'),
-  geminiEmbeddingModel: getEnvVar('GEMINI_EMBEDDING_MODEL', 'embedding-001'),
+  geminiEmbeddingModel: getEnvVar('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-001'),
   
   // WhatsApp Configuration
   whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',

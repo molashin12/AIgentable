@@ -42,9 +42,87 @@ export default function Register() {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+
+  const validatePassword = (password: string) => {
+    const minLength = password.length >= 8
+    const maxLength = password.length <= 128
+    const hasLowercase = /[a-z]/.test(password)
+    const hasUppercase = /[A-Z]/.test(password)
+    const hasNumber = /\d/.test(password)
+    const hasSpecialChar = /[@$!%*?&]/.test(password)
+    
+    return {
+      minLength,
+      maxLength,
+      hasLowercase,
+      hasUppercase,
+      hasNumber,
+      hasSpecialChar,
+      isValid: minLength && maxLength && hasLowercase && hasUppercase && hasNumber && hasSpecialChar
+    }
+  }
+
   const validateStep1 = () => {
-    if (!formData.firstName || !formData.lastName || !formData.email || !formData.password || !formData.confirmPassword) {
-      toast.error('Please fill in all fields')
+    // Check required fields
+    if (!formData.firstName.trim()) {
+      toast.error('First name is required')
+      return false
+    }
+    
+    if (formData.firstName.length > 255) {
+      toast.error('First name must not exceed 255 characters')
+      return false
+    }
+    
+    if (!formData.lastName.trim()) {
+      toast.error('Last name is required')
+      return false
+    }
+    
+    if (formData.lastName.length > 255) {
+      toast.error('Last name must not exceed 255 characters')
+      return false
+    }
+    
+    if (!formData.email.trim()) {
+      toast.error('Email is required')
+      return false
+    }
+    
+    if (!validateEmail(formData.email)) {
+      toast.error('Please enter a valid email address')
+      return false
+    }
+    
+    if (!formData.password) {
+      toast.error('Password is required')
+      return false
+    }
+    
+    const passwordValidation = validatePassword(formData.password)
+    if (!passwordValidation.isValid) {
+      if (!passwordValidation.minLength) {
+        toast.error('Password must be at least 8 characters long')
+      } else if (!passwordValidation.maxLength) {
+        toast.error('Password must not exceed 128 characters')
+      } else if (!passwordValidation.hasLowercase) {
+        toast.error('Password must contain at least one lowercase letter')
+      } else if (!passwordValidation.hasUppercase) {
+        toast.error('Password must contain at least one uppercase letter')
+      } else if (!passwordValidation.hasNumber) {
+        toast.error('Password must contain at least one number')
+      } else if (!passwordValidation.hasSpecialChar) {
+        toast.error('Password must contain at least one special character (@$!%*?&)')
+      }
+      return false
+    }
+    
+    if (!formData.confirmPassword) {
+      toast.error('Please confirm your password')
       return false
     }
     
@@ -53,19 +131,35 @@ export default function Register() {
       return false
     }
     
-    if (formData.password.length < 8) {
-      toast.error('Password must be at least 8 characters long')
-      return false
-    }
-    
     return true
   }
 
   const validateStep2 = () => {
-    if (!formData.companyName || !formData.companySize || !formData.industry || !formData.role) {
-      toast.error('Please fill in all company information')
+    if (!formData.companyName.trim()) {
+      toast.error('Company name is required')
       return false
     }
+    
+    if (formData.companyName.length > 255) {
+      toast.error('Company name must not exceed 255 characters')
+      return false
+    }
+    
+    if (!formData.companySize) {
+      toast.error('Please select company size')
+      return false
+    }
+    
+    if (!formData.industry) {
+      toast.error('Please select industry')
+      return false
+    }
+    
+    if (!formData.role) {
+      toast.error('Please select your role')
+      return false
+    }
+    
     return true
   }
 
@@ -195,7 +289,13 @@ export default function Register() {
             required
             value={formData.password}
             onChange={(e) => handleInputChange('password', e.target.value)}
-            className="appearance-none block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+            className={`appearance-none block w-full pl-10 pr-10 py-2 border rounded-md placeholder-gray-400 focus:outline-none sm:text-sm ${
+              formData.password && validatePassword(formData.password).isValid
+                ? 'border-green-300 focus:ring-green-500 focus:border-green-500'
+                : formData.password && !validatePassword(formData.password).isValid
+                ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
+                : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+            }`}
             placeholder="Create a strong password"
           />
           <button
@@ -210,7 +310,86 @@ export default function Register() {
             )}
           </button>
         </div>
-        <p className="mt-1 text-xs text-gray-500">Must be at least 8 characters long</p>
+        {/* Password Requirements */}
+        <div className="mt-2 space-y-1">
+          <p className="text-xs font-medium text-gray-700">Password requirements:</p>
+          {formData.password && (
+            <div className="space-y-1">
+              {(() => {
+                const validation = validatePassword(formData.password)
+                return (
+                  <>
+                    <div className={`flex items-center text-xs ${
+                      validation.minLength ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      <CheckCircleIcon className={`h-3 w-3 mr-1 ${
+                        validation.minLength ? 'text-green-600' : 'text-gray-400'
+                      }`} />
+                      At least 8 characters
+                    </div>
+                    <div className={`flex items-center text-xs ${
+                      validation.hasLowercase ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      <CheckCircleIcon className={`h-3 w-3 mr-1 ${
+                        validation.hasLowercase ? 'text-green-600' : 'text-gray-400'
+                      }`} />
+                      One lowercase letter
+                    </div>
+                    <div className={`flex items-center text-xs ${
+                      validation.hasUppercase ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      <CheckCircleIcon className={`h-3 w-3 mr-1 ${
+                        validation.hasUppercase ? 'text-green-600' : 'text-gray-400'
+                      }`} />
+                      One uppercase letter
+                    </div>
+                    <div className={`flex items-center text-xs ${
+                      validation.hasNumber ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      <CheckCircleIcon className={`h-3 w-3 mr-1 ${
+                        validation.hasNumber ? 'text-green-600' : 'text-gray-400'
+                      }`} />
+                      One number
+                    </div>
+                    <div className={`flex items-center text-xs ${
+                      validation.hasSpecialChar ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      <CheckCircleIcon className={`h-3 w-3 mr-1 ${
+                        validation.hasSpecialChar ? 'text-green-600' : 'text-gray-400'
+                      }`} />
+                      One special character (@$!%*?&)
+                    </div>
+                  </>
+                )
+              })()
+              }
+            </div>
+          )}
+          {!formData.password && (
+            <div className="space-y-1">
+              <div className="flex items-center text-xs text-gray-500">
+                <CheckCircleIcon className="h-3 w-3 mr-1 text-gray-400" />
+                At least 8 characters
+              </div>
+              <div className="flex items-center text-xs text-gray-500">
+                <CheckCircleIcon className="h-3 w-3 mr-1 text-gray-400" />
+                One lowercase letter
+              </div>
+              <div className="flex items-center text-xs text-gray-500">
+                <CheckCircleIcon className="h-3 w-3 mr-1 text-gray-400" />
+                One uppercase letter
+              </div>
+              <div className="flex items-center text-xs text-gray-500">
+                <CheckCircleIcon className="h-3 w-3 mr-1 text-gray-400" />
+                One number
+              </div>
+              <div className="flex items-center text-xs text-gray-500">
+                <CheckCircleIcon className="h-3 w-3 mr-1 text-gray-400" />
+                One special character (@$!%*?&)
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       
       <div>
@@ -228,7 +407,13 @@ export default function Register() {
             required
             value={formData.confirmPassword}
             onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-            className="appearance-none block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+            className={`appearance-none block w-full pl-10 pr-10 py-2 border rounded-md placeholder-gray-400 focus:outline-none sm:text-sm ${
+              formData.confirmPassword && formData.password !== formData.confirmPassword
+                ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
+                : formData.confirmPassword && formData.password === formData.confirmPassword
+                ? 'border-green-300 focus:ring-green-500 focus:border-green-500'
+                : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+            }`}
             placeholder="Confirm your password"
           />
           <button
@@ -243,6 +428,24 @@ export default function Register() {
             )}
           </button>
         </div>
+        {/* Password Match Indicator */}
+        {formData.confirmPassword && (
+          <div className="mt-1">
+            {formData.password === formData.confirmPassword ? (
+              <div className="flex items-center text-xs text-green-600">
+                <CheckCircleIcon className="h-3 w-3 mr-1" />
+                Passwords match
+              </div>
+            ) : (
+              <div className="flex items-center text-xs text-red-600">
+                <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                Passwords do not match
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -567,15 +770,64 @@ export default function Register() {
                   <button
                     type="button"
                     onClick={handleNext}
-                    className="ml-auto inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+                    disabled={(() => {
+                      if (currentStep === 1) {
+                        return !formData.firstName.trim() || 
+                               !formData.lastName.trim() || 
+                               !formData.email.trim() || 
+                               !validateEmail(formData.email) ||
+                               !formData.password || 
+                               !validatePassword(formData.password).isValid ||
+                               !formData.confirmPassword ||
+                               formData.password !== formData.confirmPassword
+                      }
+                      if (currentStep === 2) {
+                        return !formData.companyName.trim() ||
+                               !formData.companySize ||
+                               !formData.industry ||
+                               !formData.role
+                      }
+                      return false
+                    })()}
+                    className={`ml-auto inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm ${
+                      (() => {
+                        if (currentStep === 1) {
+                          const isDisabled = !formData.firstName.trim() || 
+                                           !formData.lastName.trim() || 
+                                           !formData.email.trim() || 
+                                           !validateEmail(formData.email) ||
+                                           !formData.password || 
+                                           !validatePassword(formData.password).isValid ||
+                                           !formData.confirmPassword ||
+                                           formData.password !== formData.confirmPassword
+                          return isDisabled 
+                            ? 'text-gray-400 bg-gray-300 cursor-not-allowed'
+                            : 'text-white bg-blue-600 hover:bg-blue-700'
+                        }
+                        if (currentStep === 2) {
+                          const isDisabled = !formData.companyName.trim() ||
+                                           !formData.companySize ||
+                                           !formData.industry ||
+                                           !formData.role
+                          return isDisabled 
+                            ? 'text-gray-400 bg-gray-300 cursor-not-allowed'
+                            : 'text-white bg-blue-600 hover:bg-blue-700'
+                        }
+                        return 'text-white bg-blue-600 hover:bg-blue-700'
+                      })()
+                    }`}
                   >
                     Next
                   </button>
                 ) : (
                   <button
                     type="submit"
-                    disabled={isLoading}
-                    className="ml-auto inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isLoading || !formData.agreeToTerms}
+                    className={`ml-auto inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm ${
+                      isLoading || !formData.agreeToTerms
+                        ? 'text-gray-400 bg-gray-300 cursor-not-allowed'
+                        : 'text-white bg-blue-600 hover:bg-blue-700'
+                    }`}
                   >
                     {isLoading ? (
                       <div className="flex items-center">

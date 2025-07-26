@@ -26,7 +26,9 @@ const customMessages = {
 
 // Common validation schemas
 export const commonSchemas = {
-  id: Joi.string().uuid().required().label('ID'),
+  id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().label('ID').messages({
+    'string.pattern.base': 'ID must be a valid CUID format'
+  }),
   email: Joi.string().email().required().label('Email'),
   password: Joi.string().min(8).max(128).pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/).required()
     .label('Password')
@@ -106,7 +108,6 @@ export const agentSchemas = {
     name: commonSchemas.name,
     description: Joi.string().max(1000).label('Description'),
     type: Joi.string().valid('CUSTOMER_SERVICE', 'SALES', 'SUPPORT', 'MARKETING', 'HR', 'FINANCE', 'CUSTOM').required().label('Type'),
-    model: Joi.string().valid('gpt-4', 'gpt-3.5-turbo', 'claude-3', 'claude-2').default('gpt-4').label('Model'),
     temperature: Joi.number().min(0).max(2).default(0.7).label('Temperature'),
     maxTokens: Joi.number().integer().min(1).max(4000).default(1000).label('Max Tokens'),
     systemPrompt: Joi.string().max(5000).label('System Prompt'),
@@ -123,7 +124,6 @@ export const agentSchemas = {
   update: Joi.object({
     name: commonSchemas.name.optional(),
     description: Joi.string().max(1000).optional().label('Description'),
-    model: Joi.string().valid('gpt-4', 'gpt-3.5-turbo', 'claude-3', 'claude-2').optional().label('Model'),
     temperature: Joi.number().min(0).max(2).optional().label('Temperature'),
     maxTokens: Joi.number().integer().min(1).max(4000).optional().label('Max Tokens'),
     systemPrompt: Joi.string().max(5000).optional().label('System Prompt'),
@@ -151,6 +151,10 @@ export const documentSchemas = {
     category: Joi.string().valid('KNOWLEDGE_BASE', 'FAQ', 'POLICY', 'MANUAL', 'OTHER').default('KNOWLEDGE_BASE').label('Category'),
     tags: Joi.array().items(Joi.string().max(50)).max(10).label('Tags'),
     isPublic: Joi.boolean().default(false).label('Is Public'),
+    metadata: Joi.alternatives().try(
+      Joi.string(), // JSON string from FormData
+      Joi.object() // Already parsed object
+    ).optional().label('Metadata'),
   }).messages(customMessages),
 
   update: Joi.object({

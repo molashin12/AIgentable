@@ -139,9 +139,16 @@ router.post('/', validateBody(agentSchemas.create), asyncHandler(async (req: Aut
   // Create agent
   const agent = await prisma.agent.create({
     data: {
-      ...agentData,
+      name: agentData.name,
+      description: agentData.description,
+      prompt: agentData.systemPrompt || 'You are a helpful AI assistant.',
+      personality: agentData.personality || {},
+      role: agentData.role || 'assistant',
+      temperature: agentData.temperature,
+      maxTokens: agentData.maxTokens,
+      isActive: agentData.isActive,
       tenantId,
-      createdBy: req.user!.id,
+      creatorId: req.user!.id,
     },
   });
 

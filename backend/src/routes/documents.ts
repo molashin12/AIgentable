@@ -20,6 +20,8 @@ import { v4 as uuidv4 } from 'uuid';
 import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
 import csv from 'csv-parser';
+import { broadcastDocumentDeleted } from '../sockets/socketHandlers';
+import { getIO } from '../server';
 
 const router = express.Router();
 
@@ -196,9 +198,21 @@ router.post('/upload',
   validateFileUpload(config.allowedFileTypes, config.maxFileSize),
   validateBody(documentSchemas.upload),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { agentId } = req.body;
+    const { agentId, metadata } = req.body;
     const tenantId = req.user!.tenantId;
     const files = req.files as Express.Multer.File[];
+    
+    // Parse metadata if it's a string (from FormData)
+    let parsedMetadata = metadata;
+    if (typeof metadata === 'string') {
+      try {
+        parsedMetadata = JSON.parse(metadata);
+      } catch (error) {
+        parsedMetadata = {};
+      }
+    }
+    
+    const embeddingProvider = parsedMetadata?.embeddingProvider || 'openai';
 
     if (!files || files.length === 0) {
       throw new ValidationError('No files uploaded');
@@ -262,12 +276,48 @@ router.post('/upload',
           chunkIndex: index,
           totalChunks: chunks.length,
           source: 'upload',
+          embeddingProvider,
         }));
 
-        // Add to ChromaDB
-        await chromadb.addDocuments(tenantId, chunks, chunkMetadatas);
+        // Add to ChromaDB with specified embedding provider
+        await chromadb.addDocumentsWithProvider(tenantId, chunks, chunkMetadatas, embeddingProvider);
 
-        uploadedDocuments.push(document);
+        // Update document status to COMPLETED after successful processing
+        const updatedDocument = await prisma.document.update({
+          where: { id: document.id },
+          data: {
+            status: 'COMPLETED',
+            vectorized: true,
+            metadata: {
+              chunks: chunks.length,
+              embeddingProvider,
+              category: parsedMetadata?.category || 'Uncategorized',
+              vectorized: true,
+              processingTime: Date.now() - Date.now(), // Will be updated in real processing
+            },
+            updatedAt: new Date(),
+          },
+        });
+
+        uploadedDocuments.push(updatedDocument);
+
+        // Broadcast document upload event via socket
+        try {
+          const io = getIO();
+          io.to(`tenant_${tenantId}`).emit('document_uploaded', {
+            document: updatedDocument
+          });
+          
+          // Also broadcast document processed event with chunk info
+          io.to(`tenant_${tenantId}`).emit('document_processed', {
+            documentId: updatedDocument.id,
+            chunks: chunks.length,
+            processingTime: 0,
+            metadata: updatedDocument.metadata
+          });
+        } catch (socketError) {
+          logger.warn('Failed to broadcast document upload', { documentId: document.id, socketError });
+        }
 
         logger.business('Document uploaded', {
           documentId: document.id,
@@ -379,6 +429,17 @@ router.delete('/:id', validateId, asyncHandler(async (req: AuthenticatedRequest,
   await prisma.document.delete({
     where: { id },
   });
+
+  // Broadcast document deletion via socket
+  try {
+    const io = getIO();
+    broadcastDocumentDeleted(io, tenantId, id);
+  } catch (error) {
+    logger.warn('Failed to broadcast document deletion:', {
+      documentId: id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 
   logger.business('Document deleted', {
     documentId: id,
@@ -755,20 +816,27 @@ router.post('/:id/reprocess', validateId, asyncHandler(async (req: Authenticated
     const mimeType = mimeTypeMap[document.type] || 'application/octet-stream';
     const extractedText = await extractTextFromFile(document.path, mimeType);
     
-    // Update document content
-    const updatedDocument = await prisma.document.update({
-      where: { id },
-      data: {
-        content: extractedText,
-        updatedAt: new Date(),
-      },
-    });
-
     // Delete old chunks from ChromaDB
     await chromadb.deleteDocuments(tenantId, id);
 
     // Re-chunk and add to ChromaDB
     const chunks = chromadb.chunkText(extractedText, 1000, 200);
+    
+    // Update document content and metadata
+    const updatedDocument = await prisma.document.update({
+      where: { id },
+      data: {
+        content: extractedText,
+        metadata: {
+          chunks: chunks.length,
+          embeddingProvider: 'openai', // Default for reprocessing
+          category: 'Uncategorized',
+          vectorized: true,
+          reprocessedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date(),
+      },
+    });
     const chunkMetadatas = chunks.map((chunk, index) => ({
       tenantId,
       agentId: document.agentId || '',
@@ -782,6 +850,19 @@ router.post('/:id/reprocess', validateId, asyncHandler(async (req: Authenticated
     }));
 
     await chromadb.addDocuments(tenantId, chunks, chunkMetadatas);
+
+    // Broadcast document processed event via socket
+    try {
+      const io = getIO();
+      io.to(`tenant_${tenantId}`).emit('document_processed', {
+        documentId: id,
+        chunks: chunks.length,
+        processingTime: 0,
+        metadata: updatedDocument.metadata
+      });
+    } catch (socketError) {
+      logger.warn('Failed to broadcast document reprocess', { documentId: id, socketError });
+    }
 
     logger.business('Document reprocessed', {
       documentId: id,

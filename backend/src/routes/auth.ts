@@ -1,5 +1,6 @@
 import express from 'express';
 import { Request, Response } from 'express';
+import { UserRole } from '@prisma/client';
 import { prisma } from '../config/database';
 import { redis } from '../config/redis';
 import { authService, authenticate, AuthenticatedRequest } from '../middleware/auth';
@@ -41,9 +42,12 @@ router.post('/register', validateBody(userSchemas.register), asyncHandler(async 
   }
 
   // Hash password
+  logger.info('Starting password hashing', { email });
   const hashedPassword = await authService.hashPassword(password);
+  logger.info('Password hashing completed', { email });
 
   // Create tenant and user in a transaction
+  logger.info('Starting database transaction', { email, tenantName });
   const result = await prisma.$transaction(async (tx: any) => {
     // Create tenant
     const tenant = await tx.tenant.create({
@@ -66,7 +70,7 @@ router.post('/register', validateBody(userSchemas.register), asyncHandler(async 
         password: hashedPassword,
         firstName: name.split(' ')[0] || name,
         lastName: name.split(' ').slice(1).join(' ') || '',
-        role: 'ADMIN',
+        role: UserRole.BUSINESS_OWNER,
         status: 'ACTIVE',
         tenantId: tenant.id,
       },
@@ -74,17 +78,32 @@ router.post('/register', validateBody(userSchemas.register), asyncHandler(async 
 
     return { tenant, user };
   });
+  logger.info('Database transaction completed', { email, userId: result.user.id, tenantId: result.tenant.id });
 
   // Generate tokens
+  logger.info('Generating tokens', { userId: result.user.id });
   const tokens = authService.generateTokens({
     userId: result.user.id,
     tenantId: result.tenant.id,
     email: result.user.email,
     role: result.user.role,
   });
+  logger.info('Token generation completed', { userId: result.user.id });
 
-  // Store refresh token
-  await authService.storeRefreshToken(result.user.id, tokens.refreshToken);
+  // Store refresh token with timeout handling
+  logger.info('Storing refresh token for user', { userId: result.user.id });
+  try {
+    await Promise.race([
+      authService.storeRefreshToken(result.user.id, tokens.refreshToken),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Refresh token storage timeout')), 10000)
+      )
+    ]);
+    logger.info('Refresh token stored successfully', { userId: result.user.id });
+  } catch (error) {
+    logger.error('Failed to store refresh token', { userId: result.user.id, error });
+    // Continue without failing the registration
+  }
 
   logger.business('User registered', {
     userId: result.user.id,

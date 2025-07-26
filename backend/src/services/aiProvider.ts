@@ -119,9 +119,7 @@ class AIProviderService {
         case 'openai':
           return await this.generateOpenAIBatchEmbeddings(texts, options.model);
         case 'gemini':
-          // Gemini doesn't support batch embeddings, fallback to OpenAI for consistency
-          logger.warn('Gemini batch embeddings not available, falling back to OpenAI');
-          return await this.generateOpenAIBatchEmbeddings(texts, config.openaiEmbeddingModel);
+          return await this.generateGeminiBatchEmbeddings(texts, options.model);
         default:
           throw new Error(`Unsupported AI provider for batch embeddings: ${provider}`);
       }
@@ -172,9 +170,8 @@ class AIProviderService {
           'text-embedding-3-large',
         ];
       case 'gemini':
-        // Note: Gemini embeddings fallback to OpenAI in current implementation
         return [
-          'text-embedding-ada-002', // Fallback model
+          'text-embedding-004',
         ];
       default:
         return [];
@@ -316,16 +313,68 @@ class AIProviderService {
 
   private async generateGeminiEmbedding(
     text: string,
-    model?: string
+    modelName?: string
   ): Promise<EmbeddingResponse> {
     if (!config.geminiApiKey) {
       throw new Error('Gemini API key is not configured');
     }
     
-    // For now, fallback to OpenAI for embeddings when Gemini is requested
-    // This ensures compatibility while maintaining the provider abstraction
-    logger.warn('Gemini embeddings not available in v0.1.3, falling back to OpenAI');
-    return await this.generateOpenAIEmbedding(text, config.openaiEmbeddingModel);
+    try {
+      const embeddingModel = modelName || config.geminiEmbeddingModel || 'text-embedding-004';
+      
+      // Use Google AI SDK for embeddings following official documentation
+      const ai = new GoogleGenerativeAI(config.geminiApiKey);
+      const model = ai.getGenerativeModel({ model: 'text-embedding-004' });
+      
+      const response = await model.embedContent(text);
+      
+      const embedding = response.embedding.values;
+      
+      return {
+        embedding,
+        tokensUsed: 0, // Google AI doesn't provide token usage for embeddings
+        model: embeddingModel,
+        provider: 'gemini',
+      };
+    } catch (error) {
+      logger.error('Failed to generate Gemini embedding:', error);
+      throw new Error(`Gemini embedding generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async generateGeminiBatchEmbeddings(
+    texts: string[],
+    modelName?: string
+  ): Promise<EmbeddingResponse[]> {
+    if (!config.geminiApiKey) {
+      throw new Error('Gemini API key is not configured');
+    }
+    
+    try {
+      const embeddingModel = modelName || config.geminiEmbeddingModel || 'text-embedding-004';
+      
+      // Use Google AI SDK for batch embeddings following official documentation
+      const ai = new GoogleGenerativeAI(config.geminiApiKey);
+      const model = ai.getGenerativeModel({ model: 'text-embedding-004' });
+      
+      // Process texts individually since Gemini doesn't support true batch embeddings
+      const embeddings = await Promise.all(
+        texts.map(async (text) => {
+          const response = await model.embedContent(text);
+          return response.embedding.values;
+        })
+      );
+      
+      return embeddings.map((embedding: number[]) => ({
+        embedding,
+        tokensUsed: 0, // Google AI doesn't provide token usage for embeddings
+        model: embeddingModel,
+        provider: 'gemini' as AIProvider,
+      }));
+    } catch (error) {
+      logger.error('Failed to generate Gemini batch embeddings:', error);
+      throw new Error(`Gemini batch embedding generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**
@@ -336,11 +385,11 @@ class AIProviderService {
   }
 
   /**
-   * Get embedding provider (always returns 'openai' for consistency)
+   * Get embedding provider (returns the default provider)
    */
   getEmbeddingProvider(): AIProvider {
-    // Always use OpenAI for embeddings to ensure consistency
-    return 'openai';
+    // Return the default provider since both OpenAI and Gemini now support embeddings
+    return this.defaultProvider;
   }
 
   /**
@@ -370,8 +419,8 @@ class AIProviderService {
       case 'gemini':
         return {
           chatCompletion: true,
-          embeddings: false, // Fallback to OpenAI
-          batchEmbeddings: false, // Fallback to OpenAI
+          embeddings: true, // Now supports native Gemini embeddings
+          batchEmbeddings: true, // Now supports batch embeddings
           streaming: false,
         };
       default:

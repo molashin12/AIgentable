@@ -1,6 +1,7 @@
 import { prisma } from '../config/database';
 import { chromadb } from '../config/chromadb';
-import { aiProvider, ChatMessage, ChatCompletionOptions } from './aiProvider';
+import { aiProvider, ChatMessage, ChatCompletionOptions } from './aiProviderCompat';
+import { langchainRAG } from './langchainRAG';
 import logger from '../utils/logger';
 import { getIO } from '../server';
 import { broadcastConversationUpdate, broadcastNotification } from '../sockets/socketHandlers';
@@ -330,7 +331,7 @@ class MessageProcessorService {
   }
 
   /**
-   * Get relevant documents using RAG
+   * Get relevant documents using enhanced LangChain RAG
    */
   private async getRelevantDocuments(
     tenantId: string,
@@ -342,7 +343,41 @@ class MessageProcessorService {
         return [];
       }
 
-      // Search for relevant documents
+      // Try LangChain RAG first for enhanced retrieval
+      try {
+        // Initialize with default embedding provider (OpenAI)
+        await langchainRAG.initialize('openai');
+        
+        // Try OpenAI embeddings first
+        let langchainResults = await langchainRAG.searchSimilar(query, {
+          k: 5,
+          filter: { documentId: { $in: documentIds } },
+          threshold: 0.7,
+          embeddingProvider: 'openai'
+        });
+        
+        // If no results with OpenAI, try Gemini embeddings
+        if (langchainResults.length === 0) {
+          logger.info('No results with OpenAI embeddings, trying Gemini...');
+          await langchainRAG.initialize('gemini');
+          langchainResults = await langchainRAG.searchSimilar(query, {
+            k: 5,
+            filter: { documentId: { $in: documentIds } },
+            threshold: 0.7,
+            embeddingProvider: 'gemini'
+          });
+        }
+        
+        if (langchainResults.length > 0) {
+          return langchainResults.map(doc => doc.pageContent);
+        }
+      } catch (langchainError) {
+        logger.warn('LangChain RAG failed, falling back to ChromaDB', {
+          error: langchainError instanceof Error ? langchainError.message : 'Unknown error'
+        });
+      }
+
+      // Fallback to original ChromaDB search
       const searchResults = await chromadb.searchDocuments(
         tenantId,
         query,

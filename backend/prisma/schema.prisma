@@ -19,7 +19,7 @@ model User {
   lastName  String
   phone     String?
   avatar    String?
-  role      UserRole @default(TENANT_USER)
+  role      UserRole @default(TEAM_MEMBER)
   status    UserStatus @default(ACTIVE)
   emailVerified Boolean @default(false)
   lastLogin DateTime?
@@ -492,9 +492,10 @@ model EmailLog {
 
 // Enums
 enum UserRole {
-  PLATFORM_ADMIN
-  TENANT_ADMIN
-  TENANT_USER
+  PLATFORM_ADMIN    // SaaS owner who manages the entire platform
+  BUSINESS_OWNER    // Business owner/manager who manages AI agents and conversations
+  TEAM_MEMBER       // User within a business organization
+  END_CUSTOMER      // External customer interacting with AI agents
 }
 
 enum UserStatus {

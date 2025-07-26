@@ -480,17 +480,25 @@ export const validateContentType = (allowedTypes: string[]) => {
     const contentType = req.get('Content-Type');
     
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-      if (!contentType || !allowedTypes.some(type => contentType.includes(type))) {
+      // Skip validation for empty body requests
+      if (!req.body || Object.keys(req.body).length === 0) {
+        return next();
+      }
+      
+      if (!contentType || !allowedTypes.some(type => contentType.toLowerCase().includes(type.toLowerCase()))) {
         logger.warn('Invalid content type', {
           contentType,
           allowedTypes,
           path: req.path,
           ip: req.ip,
+          method: req.method,
+          hasBody: !!req.body,
         });
         
         return res.status(415).json({
           error: 'Unsupported Media Type',
           message: `Content-Type must be one of: ${allowedTypes.join(', ')}`,
+          received: contentType || 'none',
         });
       }
     }

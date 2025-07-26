@@ -261,6 +261,29 @@ export const initializeSocketHandlers = (io: SocketIOServer): void => {
       }
     });
 
+    // Handle document events
+    socket.on('join_documents', () => {
+      if (socket.tenantId) {
+        socket.join(`documents:${socket.tenantId}`);
+        logger.debug('User joined documents room', {
+          userId: socket.userId,
+          tenantId: socket.tenantId,
+          socketId: socket.id,
+        });
+      }
+    });
+
+    socket.on('leave_documents', () => {
+      if (socket.tenantId) {
+        socket.leave(`documents:${socket.tenantId}`);
+        logger.debug('User left documents room', {
+          userId: socket.userId,
+          tenantId: socket.tenantId,
+          socketId: socket.id,
+        });
+      }
+    });
+
     // Handle disconnection
     socket.on('disconnect', (reason) => {
       // Clean up connected users tracking
@@ -318,6 +341,58 @@ export const broadcastAgentResponse = (io: SocketIOServer, conversationId: strin
 // Broadcast system notification
 export const broadcastSystemNotification = (io: SocketIOServer, tenantId: string, notification: any): void => {
   io.to(`tenant:${tenantId}`).emit('system_notification', notification);
+};
+
+// Document-related broadcast functions
+export const broadcastDocumentUploaded = (io: SocketIOServer, tenantId: string, document: any): void => {
+  io.to(`documents:${tenantId}`).emit('document_uploaded', {
+    document,
+    timestamp: new Date()
+  });
+  
+  logger.info('Document upload broadcasted', {
+    tenantId,
+    documentId: document.id,
+    documentName: document.name
+  });
+};
+
+export const broadcastDocumentStatusUpdate = (io: SocketIOServer, tenantId: string, documentUpdate: any): void => {
+  io.to(`documents:${tenantId}`).emit('document_status_updated', {
+    ...documentUpdate,
+    timestamp: new Date()
+  });
+  
+  logger.info('Document status update broadcasted', {
+    tenantId,
+    documentId: documentUpdate.id,
+    status: documentUpdate.status
+  });
+};
+
+export const broadcastDocumentProcessed = (io: SocketIOServer, tenantId: string, document: any): void => {
+  io.to(`documents:${tenantId}`).emit('document_processed', {
+    document,
+    timestamp: new Date()
+  });
+  
+  logger.info('Document processing completion broadcasted', {
+    tenantId,
+    documentId: document.id,
+    chunks: document.metadata?.chunks || 0
+  });
+};
+
+export const broadcastDocumentDeleted = (io: SocketIOServer, tenantId: string, documentId: string): void => {
+  io.to(`documents:${tenantId}`).emit('document_deleted', {
+    documentId,
+    timestamp: new Date()
+  });
+  
+  logger.info('Document deletion broadcasted', {
+    tenantId,
+    documentId
+  });
 };
 
 // Enhanced real-time helper functions

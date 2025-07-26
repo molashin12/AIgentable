@@ -190,6 +190,41 @@ class ChromaDBConnection {
     }
   }
 
+  public async addDocumentsWithProvider(
+    tenantId: string,
+    documents: string[],
+    metadatas: DocumentMetadata[],
+    embeddingProvider: string = 'openai',
+    ids?: string[]
+  ): Promise<void> {
+    try {
+      const collection = await this.getTenantCollection(tenantId);
+      
+      const documentIds = ids || documents.map((_, index) => 
+        `${tenantId}_${metadatas[index].documentId}_${metadatas[index].chunkIndex}_${Date.now()}`
+      );
+      
+      // Generate embeddings using the specified provider
+      const embeddings: number[][] = [];
+      for (const document of documents) {
+        const embedding = await aiProvider.generateEmbedding(document, { provider: embeddingProvider as any });
+        embeddings.push(embedding.embedding);
+      }
+      
+      await collection.add({
+        ids: documentIds,
+        documents,
+        metadatas: metadatas as Metadata[],
+        embeddings,
+      });
+      
+      logger.info(`Added ${documents.length} documents to collection for tenant ${tenantId} with provider ${embeddingProvider}`);
+    } catch (error) {
+      logger.error(`Failed to add documents for tenant ${tenantId} with provider ${embeddingProvider}:`, error);
+      throw error;
+    }
+  }
+
   public async searchDocuments(
     tenantId: string,
     query: string,

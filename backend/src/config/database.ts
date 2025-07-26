@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import { config } from './config';
 import logger from '../utils/logger';
 
@@ -154,7 +154,7 @@ class DatabaseConnection {
           password: 'temp_password_123',
           firstName: 'System',
           lastName: 'Administrator',
-          role: 'TENANT_ADMIN',
+          role: UserRole.BUSINESS_OWNER,
           status: 'ACTIVE',
           tenantId: defaultTenant.id,
         },

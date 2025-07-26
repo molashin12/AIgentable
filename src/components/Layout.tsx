@@ -13,11 +13,18 @@ import {
   MoonIcon,
   LanguageIcon,
   ChevronDownIcon,
+  UsersIcon,
+  CreditCardIcon,
+  KeyIcon,
+  GlobeAltIcon,
+  BuildingOfficeIcon,
+  ChartPieIcon,
 } from '@heroicons/react/24/outline'
 import { useState, Fragment } from 'react'
 import { Menu, Transition } from '@headlessui/react'
 import { useTheme } from '../hooks/useTheme'
 import { useLanguage, supportedLanguages } from '../contexts/LanguageContext'
+import { useAuth } from '../contexts/AuthContext'
 
 const getNavigation = (t: (key: string) => string) => [
   { name: t('nav.dashboard'), href: '/app/dashboard', icon: HomeIcon },
@@ -26,6 +33,13 @@ const getNavigation = (t: (key: string) => string) => [
   { name: t('nav.channels'), href: '/app/channels', icon: ChatBubbleLeftRightIcon },
   { name: t('nav.conversations'), href: '/app/conversations', icon: UserGroupIcon },
   { name: t('nav.analytics'), href: '/app/analytics', icon: ChartBarIcon },
+  { name: 'Advanced Analytics', href: '/app/advanced-analytics', icon: ChartPieIcon },
+  { name: 'User Management', href: '/app/users', icon: UsersIcon },
+  { name: 'Billing', href: '/app/billing', icon: CreditCardIcon },
+  { name: 'Advanced Config', href: '/app/advanced-config', icon: CpuChipIcon },
+  { name: 'Tenants', href: '/app/tenants', icon: BuildingOfficeIcon },
+  { name: 'API Keys', href: '/app/api-keys', icon: KeyIcon },
+  { name: 'Webhooks', href: '/app/webhooks', icon: GlobeAltIcon },
   { name: t('nav.settings'), href: '/app/settings', icon: Cog6ToothIcon },
 ]
 
@@ -34,9 +48,32 @@ function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { theme, toggleTheme, isDark } = useTheme()
   const { language, setLanguage, t } = useLanguage()
+  const { user } = useAuth()
   const navigation = getNavigation(t)
   
   const currentLanguage = supportedLanguages.find(lang => lang.code === language)
+  
+  // Get user display name and initials
+  const displayName = user ? `${user.firstName} ${user.lastName}` : 'User'
+  const userInitials = user ? `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() : 'U'
+  
+  // Format role display
+  const formatRole = (role: string) => {
+    switch (role) {
+      case 'PLATFORM_ADMIN':
+        return 'Platform Admin'
+      case 'BUSINESS_OWNER':
+        return 'Business Owner'
+      case 'TEAM_MEMBER':
+        return 'Team Member'
+      case 'END_CUSTOMER':
+        return 'Customer'
+      default:
+        return role
+    }
+  }
+  
+  const userRole = user?.role ? formatRole(user.role) : 'User'
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
@@ -169,11 +206,11 @@ function Layout() {
               </button>
               <div className="flex items-center space-x-3">
                 <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-white">JD</span>
+                  <span className="text-sm font-medium text-white">{userInitials}</span>
                 </div>
                 <div className="hidden md:block">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">John Doe</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Tenant Admin</div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">{displayName}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{userRole}</div>
                 </div>
               </div>
             </div>

@@ -5,6 +5,7 @@ import {
   EyeSlashIcon,
   EnvelopeIcon,
   LockClosedIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { toast } from 'sonner'
 import { useAuth } from '../contexts/AuthContext'
@@ -17,20 +18,54 @@ export default function Login() {
     rememberMe: false,
   })
   const [showPassword, setShowPassword] = useState(false)
+  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({})
+  const [attemptCount, setAttemptCount] = useState(0)
 
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+    // Clear field-specific errors when user starts typing
+    if (errors[field as keyof typeof errors]) {
+      setErrors(prev => ({ ...prev, [field]: undefined }))
+    }
+  }
+
+  const validateForm = () => {
+    const newErrors: { email?: string; password?: string } = {}
+    
+    if (!formData.email) {
+      newErrors.email = 'Email is required'
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address'
+    }
+    
+    if (!formData.password) {
+      newErrors.password = 'Password is required'
+    } else if (formData.password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters'
+    }
+    
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!formData.email || !formData.password) {
-      toast.error('Please fill in all fields')
+    if (!validateForm()) {
       return
     }
 
-    await login(formData.email, formData.password)
+    setErrors({})
+    const success = await login(formData.email, formData.password)
+    
+    if (!success) {
+      setAttemptCount(prev => prev + 1)
+      
+      // Show helpful message after multiple failed attempts
+      if (attemptCount >= 2) {
+        setErrors({ general: 'Having trouble logging in? Make sure you have an account or try registering.' })
+      }
+    }
   }
 
   const handleGoogleLogin = () => {
@@ -55,12 +90,12 @@ export default function Login() {
             </div>
             <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Sign in to your account</h2>
             <p className="mt-2 text-sm text-gray-600">
-              Or{' '}
+              Don't have an account?{' '}
               <Link
                 to="/register"
                 className="font-medium text-blue-600 hover:text-blue-500"
               >
-                create a new account
+                Sign up here
               </Link>
             </p>
           </div>
@@ -121,26 +156,49 @@ export default function Login() {
 
             <div className="mt-6">
               <form className="space-y-6" onSubmit={handleSubmit}>
+                {errors.general && (
+                  <div className="rounded-md bg-yellow-50 p-4">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <ExclamationTriangleIcon className="h-5 w-5 text-yellow-400" aria-hidden="true" />
+                      </div>
+                      <div className="ml-3">
+                        <p className="text-sm text-yellow-800">{errors.general}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                     Email address
                   </label>
                   <div className="mt-1 relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <EnvelopeIcon className="h-5 w-5 text-gray-400" />
+                      <EnvelopeIcon className={`h-5 w-5 ${errors.email ? 'text-red-400' : 'text-gray-400'}`} aria-hidden="true" />
                     </div>
                     <input
                       id="email"
                       name="email"
                       type="email"
                       autoComplete="email"
-                      required
                       value={formData.email}
                       onChange={(e) => handleInputChange('email', e.target.value)}
-                      className="appearance-none block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      className={`appearance-none block w-full pl-10 pr-3 py-2 border rounded-md placeholder-gray-400 focus:outline-none sm:text-sm ${
+                        errors.email
+                          ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
+                          : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
                       placeholder="Enter your email"
+                      aria-invalid={errors.email ? 'true' : 'false'}
+                      aria-describedby={errors.email ? 'email-error' : undefined}
                     />
                   </div>
+                  {errors.email && (
+                    <p className="mt-2 text-sm text-red-600" id="email-error">
+                      {errors.email}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -149,18 +207,23 @@ export default function Login() {
                   </label>
                   <div className="mt-1 relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <LockClosedIcon className="h-5 w-5 text-gray-400" />
+                      <LockClosedIcon className={`h-5 w-5 ${errors.password ? 'text-red-400' : 'text-gray-400'}`} aria-hidden="true" />
                     </div>
                     <input
                       id="password"
                       name="password"
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="current-password"
-                      required
                       value={formData.password}
                       onChange={(e) => handleInputChange('password', e.target.value)}
-                      className="appearance-none block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      className={`appearance-none block w-full pl-10 pr-10 py-2 border rounded-md placeholder-gray-400 focus:outline-none sm:text-sm ${
+                        errors.password
+                          ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
+                          : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
                       placeholder="Enter your password"
+                      aria-invalid={errors.password ? 'true' : 'false'}
+                      aria-describedby={errors.password ? 'password-error' : undefined}
                     />
                     <button
                       type="button"
@@ -168,12 +231,17 @@ export default function Login() {
                       className="absolute inset-y-0 right-0 pr-3 flex items-center"
                     >
                       {showPassword ? (
-                        <EyeSlashIcon className="h-5 w-5 text-gray-400 hover:text-gray-500" />
+                        <EyeSlashIcon className="h-5 w-5 text-gray-400 hover:text-gray-500" aria-hidden="true" />
                       ) : (
-                        <EyeIcon className="h-5 w-5 text-gray-400 hover:text-gray-500" />
+                        <EyeIcon className="h-5 w-5 text-gray-400 hover:text-gray-500" aria-hidden="true" />
                       )}
                     </button>
                   </div>
+                  {errors.password && (
+                    <p className="mt-2 text-sm text-red-600" id="password-error">
+                      {errors.password}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -204,8 +272,12 @@ export default function Login() {
                 <div>
                   <button
                     type="submit"
-                    disabled={isLoading}
-                    className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isLoading || Object.keys(errors).length > 0}
+                    className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors ${
+                      isLoading || Object.keys(errors).length > 0
+                        ? 'bg-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
                   >
                     {isLoading ? (
                       <div className="flex items-center">
@@ -217,6 +289,17 @@ export default function Login() {
                     )}
                   </button>
                 </div>
+                
+                {attemptCount >= 2 && (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-md">
+                    <h4 className="text-sm font-medium text-blue-800 mb-2">Need help?</h4>
+                    <ul className="text-sm text-blue-700 space-y-1">
+                      <li>• Make sure you're using the correct email and password</li>
+                      <li>• If you don't have an account, <Link to="/register" className="font-medium underline">register here</Link></li>
+                      <li>• Contact support if you continue having issues</li>
+                    </ul>
+                  </div>
+                )}
               </form>
             </div>
           </div>
